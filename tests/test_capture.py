@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import copy
+import json
 from pathlib import Path
 
+import pytest
 import yaml
 from conftest import write_config
 
 from aasg.android import CommandResult, Device
-from aasg.capture import CaptureRunner, Selection, expand_capture_ids, expand_variant_ids
+from aasg.capture import (
+    CaptureRunner,
+    Selection,
+    expand_capture_ids,
+    expand_navigation_modes,
+    expand_variant_ids,
+    has_selectable_navigation,
+)
 from aasg.config import load_config
-from aasg.errors import ExitCode
+from aasg.errors import ExitCode, PrerequisiteError
 
 
 def test_expands_groups_and_all_variants(tmp_path: Path) -> None:
@@ -16,6 +26,7 @@ def test_expands_groups_and_all_variants(tmp_path: Path) -> None:
 
     assert expand_capture_ids(config, ["screenshots"], False) == ["home"]
     assert expand_variant_ids(["all"], config.variants.locales, name="locales") == ["en", "es"]
+    assert expand_navigation_modes(["all"]) == ["gestural", "three-button"]
 
 
 def test_dry_run_writes_resolved_manifest(tmp_path: Path) -> None:
@@ -32,9 +43,59 @@ def test_dry_run_writes_resolved_manifest(tmp_path: Path) -> None:
     )
 
     assert outcome.failed == 0
+    assert outcome.manifest["schema"] == 2
+    assert outcome.manifest["navigation"]["status"] == "ignored"
     assert outcome.manifest["variants"][0]["status"] == "succeeded"
     assert outcome.manifest["assets"] == ["artifacts/screenshots/raw/en/home-light.png"]
     assert (outcome.run_root / "run.json").is_file()
+
+
+def test_dry_run_expands_mixed_navigation_policies(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    home = data["captures"]["home"]
+    home["navigation"] = "all"
+    home["artifacts"][0]["publish"] = "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
+    fixed = copy.deepcopy(home)
+    fixed["label"] = "Fixed"
+    fixed["navigation"] = "three-button"
+    fixed["artifacts"][0]["publish"] = "screenshots/raw/{locale}/fixed-{theme}.png"
+    ignored = copy.deepcopy(home)
+    ignored["label"] = "Ignored"
+    ignored["navigation"] = "ignore"
+    ignored["artifacts"][0]["publish"] = "screenshots/raw/{locale}/ignored-{theme}.png"
+    data["captures"] = {"home": home, "fixed": fixed, "ignored": ignored}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    (tmp_path / "gradlew").touch()
+    config = load_config(path)
+    selection = Selection(
+        ["home", "fixed", "ignored"],
+        ["en"],
+        ["light"],
+        ["gestural", "three-button"],
+    )
+
+    outcome = CaptureRunner().run(
+        config=config,
+        config_path=path,
+        device=Device("dry-run", "device"),
+        selection=selection,
+        dry_run=True,
+    )
+
+    assert has_selectable_navigation(config, selection.captures)
+    assert [variant["navigation"] for variant in outcome.manifest["variants"]] == [
+        "gestural",
+        "three-button",
+        "three-button",
+        "ignore",
+    ]
+    assert outcome.manifest["selection"]["navigation"] == ["gestural", "three-button"]
+    assert outcome.manifest["navigation"]["status"] == "planned"
+    assert outcome.manifest["assets"][:2] == [
+        "artifacts/screenshots/raw/en/home-light-gestural.png",
+        "artifacts/screenshots/raw/en/home-light-three-button.png",
+    ]
 
 
 def test_preparation_failure_is_persisted(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -58,3 +119,127 @@ def test_preparation_failure_is_persisted(tmp_path: Path, monkeypatch) -> None: 
     assert outcome.exit_code == int(ExitCode.CAPTURE_FAILED)
     assert outcome.manifest["prepare_error"]
     assert (outcome.run_root / "run.json").is_file()
+
+
+class FakeNavigationController:
+    available = ("gestural", "three-button")
+    original_mode = "three-button"
+    current_mode = "three-button"
+
+    def __init__(self, *, restore_error: bool = False) -> None:
+        self.events: list[dict[str, object]] = []
+        self.restore_error = restore_error
+        self.restored = False
+
+    def require_modes(self, modes: set[str]) -> None:
+        assert modes
+
+    def restore(self) -> dict[str, object]:
+        self.restored = True
+        if self.restore_error:
+            raise PrerequisiteError("restore failed")
+        event: dict[str, object] = {
+            "action": "restore",
+            "mode": "three-button",
+            "status": "succeeded",
+        }
+        self.events.append(event)
+        return event
+
+    def manual_restore_guidance(self) -> str:
+        return "adb -s '<device-serial>' shell restore"
+
+
+def configured_navigation_path(tmp_path: Path) -> Path:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["navigation"] = "gestural"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    return path
+
+
+def test_restoration_failure_sets_prerequisite_exit_code(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    path = configured_navigation_path(tmp_path)
+    config = load_config(path)
+    controller = FakeNavigationController(restore_error=True)
+    monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
+    monkeypatch.setattr("aasg.capture.NavigationController.inspect", lambda **kwargs: controller)
+    runner = CaptureRunner()
+    monkeypatch.setattr(
+        runner,
+        "_run_variant",
+        lambda **kwargs: {"status": "succeeded", "artifacts": []},
+    )
+
+    outcome = runner.run(
+        config=config,
+        config_path=path,
+        device=Device("ABC", "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+    )
+
+    assert controller.restored
+    assert outcome.exit_code == int(ExitCode.UNAVAILABLE)
+    assert outcome.manifest["navigation"]["restoration"]["status"] == "failed"
+    assert "<device-serial>" in outcome.manifest["navigation"]["restoration"]["manual_command"]
+
+
+def test_capture_failure_remains_authoritative_and_restores_navigation(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = configured_navigation_path(tmp_path)
+    config = load_config(path)
+    controller = FakeNavigationController(restore_error=True)
+    monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
+    monkeypatch.setattr("aasg.capture.NavigationController.inspect", lambda **kwargs: controller)
+    runner = CaptureRunner()
+    monkeypatch.setattr(
+        runner,
+        "_run_variant",
+        lambda **kwargs: {
+            "status": "failed",
+            "artifacts": [],
+            "exit_code": int(ExitCode.CAPTURE_FAILED),
+        },
+    )
+
+    outcome = runner.run(
+        config=config,
+        config_path=path,
+        device=Device("ABC", "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+    )
+
+    assert controller.restored
+    assert outcome.exit_code == int(ExitCode.CAPTURE_FAILED)
+    assert outcome.manifest["navigation"]["restoration"]["status"] == "failed"
+
+
+def test_interruption_restores_navigation_and_persists_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = configured_navigation_path(tmp_path)
+    config = load_config(path)
+    controller = FakeNavigationController()
+    monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
+    monkeypatch.setattr("aasg.capture.NavigationController.inspect", lambda **kwargs: controller)
+    runner = CaptureRunner()
+
+    def interrupt(**kwargs):  # type: ignore[no-untyped-def]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner, "_run_variant", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.run(
+            config=config,
+            config_path=path,
+            device=Device("ABC", "device"),
+            selection=Selection(["home"], ["en"], ["light"]),
+        )
+
+    manifests = list((tmp_path / "artifacts" / "aasg" / "runs").glob("*/run.json"))
+    manifest = json.loads(manifests[0].read_text())
+    assert controller.restored
+    assert manifest["result"]["exit_code"] == int(ExitCode.INTERRUPTED)
+    assert manifest["navigation"]["restoration"]["status"] == "succeeded"

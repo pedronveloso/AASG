@@ -73,6 +73,10 @@ class ArtifactConfig(StrictModel):
     renditions: list[RenditionConfig] = Field(default_factory=list)
 
 
+NavigationMode = Literal["gestural", "three-button"]
+NavigationPolicy = Literal["gestural", "three-button", "all", "ignore"]
+
+
 class CaptureConfig(StrictModel):
     label: str
     test: str
@@ -80,6 +84,7 @@ class CaptureConfig(StrictModel):
     timeout_seconds: int | None = Field(default=None, gt=0)
     locales: list[str] | None = None
     themes: list[str] | None = None
+    navigation: NavigationPolicy = "ignore"
     artifacts: list[ArtifactConfig]
 
 
@@ -214,11 +219,11 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
-CONFIG_SCHEMA_VERSION = 2
+CONFIG_SCHEMA_VERSION = 3
 
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[2] = Field(alias="schema")
+    schema_version: Literal[3] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig
@@ -257,6 +262,14 @@ class AasgConfig(StrictModel):
                 if theme not in self.variants.themes:
                     raise ValueError(f"capture {capture_id!r} references unknown theme {theme!r}")
             for artifact in capture.artifacts:
+                if capture.navigation == "all":
+                    navigation_paths = [artifact.publish]
+                    navigation_paths.extend(rendition.publish for rendition in artifact.renditions)
+                    if any("{navigation}" not in path for path in navigation_paths):
+                        raise ValueError(
+                            f"capture {capture_id!r} uses navigation 'all', so every publication "
+                            "path must contain {navigation}"
+                        )
                 for rendition in artifact.renditions:
                     if rendition.pipeline not in self.pipelines:
                         raise ValueError(

@@ -15,12 +15,23 @@ from rich.console import Console
 from rich.table import Table
 
 from aasg import __version__
-from aasg.android import Device, discover_devices, enrich_device, redact_serial
+from aasg.android import (
+    NAVIGATION_MODES,
+    Device,
+    active_user,
+    discover_devices,
+    enrich_device,
+    navigation_state,
+    redact_serial,
+    require_active_navigation,
+)
 from aasg.capture import (
     CaptureRunner,
     Selection,
     expand_capture_ids,
+    expand_navigation_modes,
     expand_variant_ids,
+    has_selectable_navigation,
 )
 from aasg.config import STARTER_CONFIG, load_config, project_path
 from aasg.errors import (
@@ -38,7 +49,7 @@ from aasg.frames import (
     resolve_frame,
 )
 from aasg.media import MediaProcessor
-from aasg.models import AasgConfig, DeviceFrameStep, RemoteFrameSource
+from aasg.models import AasgConfig, DeviceFrameStep, NavigationMode, RemoteFrameSource
 from aasg.state import load_selection, save_selection
 
 app = typer.Typer(
@@ -51,6 +62,10 @@ frames_app = typer.Typer(help="Inspect and cache device-frame assets.")
 app.add_typer(config_app, name="config")
 app.add_typer(frames_app, name="frames")
 console = Console(stderr=True)
+NAVIGATION_CHOICES = {
+    "gestural": "Gesture navigation",
+    "three-button": "Three-button navigation",
+}
 
 ConfigOption = Annotated[
     Path, typer.Option("--config", "-c", help="Path to aasg.yaml.", dir_okay=False)
@@ -76,7 +91,9 @@ def _previous_selection_summary(previous: dict[str, object], config: AasgConfig)
         f"  Device: {device_label}\n"
         f"  Captures: {labeled(values('captures'), capture_labels)}\n"
         f"  Locales: {labeled(values('locales'), config.variants.locales)}\n"
-        f"  Themes: {labeled(values('themes'), config.variants.themes)}"
+        f"  Themes: {labeled(values('themes'), config.variants.themes)}\n"
+        f"  Navigation for 'all' captures: "
+        f"{labeled(values('navigation'), NAVIGATION_CHOICES)}"
     )
 
 
@@ -209,6 +226,43 @@ def doctor(
                     "detail": f"requires API {config.android.min_api}+",
                 }
             )
+            required_navigation: set[NavigationMode] = set()
+            for capture_config in config.captures.values():
+                if capture_config.navigation == "all":
+                    required_navigation.update(NAVIGATION_MODES)
+                elif capture_config.navigation == "gestural":
+                    required_navigation.add("gestural")
+                elif capture_config.navigation == "three-button":
+                    required_navigation.add("three-button")
+            navigation_details: list[str] = []
+            navigation_ok = True
+            if required_navigation:
+                for online_device in online:
+                    try:
+                        user = active_user(config.android.adb, online_device.serial)
+                        state = navigation_state(config.android.adb, online_device.serial, user)
+                        active = require_active_navigation(state)
+                        missing = required_navigation - set(state.available)
+                        navigation_ok = navigation_ok and not missing
+                        detail = (
+                            f"{online_device.label}: active {active}; available "
+                            f"{', '.join(state.available) or 'none'}"
+                        )
+                        if missing:
+                            detail += f"; missing {', '.join(sorted(missing))}"
+                        navigation_details.append(detail)
+                    except AasgError as error:
+                        navigation_ok = False
+                        navigation_details.append(f"{online_device.label}: {error}")
+            checks.append(
+                {
+                    "check": "System navigation",
+                    "ok": not required_navigation or (bool(online) and navigation_ok),
+                    "detail": navigation_details
+                    if required_navigation
+                    else "all captures ignore system navigation",
+                }
+            )
         except AasgError as error:
             checks.append({"check": "Android devices", "ok": False, "detail": str(error)})
         frame_requirements = {
@@ -259,6 +313,13 @@ def capture(
     device_serial: Annotated[str | None, typer.Option("--device")] = None,
     locales: Annotated[list[str] | None, typer.Option("--locale")] = None,
     themes: Annotated[list[str] | None, typer.Option("--theme")] = None,
+    navigation_modes: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--navigation",
+            help="Navigation mode for captures configured with navigation: all.",
+        ),
+    ] = None,
     all_captures: Annotated[bool, typer.Option("--all")] = False,
     non_interactive: Annotated[bool, typer.Option("--non-interactive")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
@@ -271,12 +332,15 @@ def capture(
         requested_captures = list(capture_ids or [])
         requested_locales = list(locales or [])
         requested_themes = list(themes or [])
+        requested_navigation = list(navigation_modes or [])
+        navigation_was_explicit = bool(requested_navigation)
         previous = load_selection(config_path)
         can_reuse_previous = (
             not requested_captures
             and not all_captures
             and not requested_locales
             and not requested_themes
+            and not requested_navigation
             and previous
             and not non_interactive
         )
@@ -290,6 +354,7 @@ def capture(
             requested_captures = list(previous.get("captures", []))
             requested_locales = list(previous.get("locales", []))
             requested_themes = list(previous.get("themes", []))
+            requested_navigation = list(previous.get("navigation", []))
             previous_device = previous.get("device")
             if device_serial is None and isinstance(previous_device, str):
                 device_serial = previous_device
@@ -315,6 +380,19 @@ def capture(
         selected_themes = expand_variant_ids(
             requested_themes, config.variants.themes, name="themes"
         )
+        navigation_is_selectable = has_selectable_navigation(config, selected_captures)
+        if navigation_is_selectable:
+            if not requested_navigation:
+                requested_navigation = (
+                    ["all"] if non_interactive else _prompt_many("Navigation", NAVIGATION_CHOICES)
+                )
+            selected_navigation = expand_navigation_modes(requested_navigation)
+        else:
+            if navigation_was_explicit:
+                raise ConfigurationError(
+                    "--navigation only applies to captures configured with navigation: all"
+                )
+            selected_navigation = []
 
         if dry_run:
             device = Device(device_serial or "dry-run", "device")
@@ -326,7 +404,12 @@ def capture(
                 raise PrerequisiteError(
                     f"{device.label} does not meet API {config.android.min_api}+"
                 )
-        selection = Selection(selected_captures, selected_locales, selected_themes)
+        selection = Selection(
+            selected_captures,
+            selected_locales,
+            selected_themes,
+            selected_navigation,
+        )
         outcome = CaptureRunner().run(
             config=config,
             config_path=config_path,
@@ -335,7 +418,7 @@ def capture(
             dry_run=dry_run,
             verbose=verbose,
         )
-        if not dry_run and outcome.failed == 0:
+        if not dry_run and outcome.exit_code == 0:
             save_selection(
                 config_path,
                 {
@@ -343,6 +426,7 @@ def capture(
                     "captures": selection.captures,
                     "locales": selection.locales,
                     "themes": selection.themes,
+                    "navigation": selection.navigation_modes,
                 },
             )
         summary = {
@@ -364,7 +448,13 @@ def capture(
                 console.print(f"{label}:")
                 for asset in assets:
                     console.print(f"  {asset}", markup=False)
-        if outcome.failed:
+        restoration = outcome.manifest.get("navigation", {}).get("restoration", {})
+        if isinstance(restoration, dict) and restoration.get("status") == "failed":
+            console.print(
+                "[red]Device navigation restoration failed.[/red] "
+                f"{restoration.get('manual_command', '')}"
+            )
+        if outcome.exit_code:
             raise typer.Exit(outcome.exit_code)
     except typer.Exit:
         raise

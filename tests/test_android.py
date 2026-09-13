@@ -9,11 +9,16 @@ from aasg import android
 from aasg.android import (
     CommandResult,
     Device,
+    NavigationController,
+    NavigationState,
     active_user,
     discover_devices,
     gradle_command,
     instrumentation_command,
     instrumentation_succeeded,
+    navigation_switch_command,
+    parse_navigation_state,
+    require_active_navigation,
     run_supervised,
     select_device,
 )
@@ -104,6 +109,141 @@ def test_reads_and_validates_active_android_user(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(android, "_run_text", lambda command: "-2\n")
     with pytest.raises(PrerequisiteError, match="invalid active user"):
         active_user("adb", "ABC")
+
+
+def test_parses_android_navigation_overlays() -> None:
+    state = parse_navigation_state(
+        "android\n"
+        "[x] com.android.internal.systemui.navbar.threebutton\n"
+        "[ ] com.android.internal.systemui.navbar.gestural\n"
+    )
+
+    assert state.available == ("gestural", "three-button")
+    assert state.active == "three-button"
+    assert navigation_switch_command("adb", "ABC", 10, "gestural") == [
+        "adb",
+        "-s",
+        "ABC",
+        "shell",
+        "cmd overlay enable-exclusive --user 10 --category "
+        "com.android.internal.systemui.navbar.gestural",
+    ]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        NavigationState(("gestural", "three-button"), ()),
+        NavigationState(("gestural", "three-button"), ("gestural", "three-button")),
+    ],
+)
+def test_requires_exactly_one_active_navigation_mode(state: NavigationState) -> None:
+    with pytest.raises(PrerequisiteError, match="exactly one active"):
+        require_active_navigation(state)
+
+
+def test_navigation_controller_switches_and_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    states = iter(
+        [
+            NavigationState(("gestural", "three-button"), ("three-button",)),
+            NavigationState(("gestural", "three-button"), ("gestural",)),
+            NavigationState(("gestural", "three-button"), ("gestural",)),
+            NavigationState(("gestural", "three-button"), ("three-button",)),
+        ]
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(android, "navigation_state", lambda *args: next(states))
+
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
+        commands.append(list(command))
+        return CommandResult(0, 0.1)
+
+    monkeypatch.setattr(android, "run_supervised", run)
+    controller = NavigationController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "navigation.log",
+        available=("gestural", "three-button"),
+        original_mode="three-button",
+        settle_seconds=0,
+    )
+
+    assert controller.ensure("gestural")["status"] == "succeeded"
+    assert controller.restore()["status"] == "succeeded"
+    assert controller.current_mode == "three-button"
+    assert len(commands) == 2
+    assert controller.events[-1]["action"] == "restore"
+
+
+def test_navigation_controller_rejects_missing_mode(tmp_path: Path) -> None:
+    controller = NavigationController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "navigation.log",
+        available=("gestural",),
+        original_mode="gestural",
+    )
+
+    with pytest.raises(PrerequisiteError, match="three-button"):
+        controller.require_modes({"gestural", "three-button"})
+
+
+def test_navigation_controller_skips_an_already_active_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        android,
+        "navigation_state",
+        lambda *args: NavigationState(("gestural", "three-button"), ("gestural",)),
+    )
+    controller = NavigationController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "navigation.log",
+        available=("gestural", "three-button"),
+        original_mode="gestural",
+    )
+
+    assert controller.ensure("gestural")["status"] == "unchanged"
+    assert not (tmp_path / "navigation.log").exists()
+
+
+def test_navigation_controller_reports_verification_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        android,
+        "navigation_state",
+        lambda *args: NavigationState(("gestural", "three-button"), ("three-button",)),
+    )
+    monkeypatch.setattr(
+        android,
+        "run_supervised",
+        lambda *args, **kwargs: CommandResult(0, 0.1),
+    )
+    controller = NavigationController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "navigation.log",
+        available=("gestural", "three-button"),
+        original_mode="three-button",
+        verify_timeout_seconds=0,
+        settle_seconds=0,
+    )
+
+    with pytest.raises(PrerequisiteError, match="Timed out"):
+        controller.ensure("gestural")
+    assert controller.events[-1]["status"] == "failed"
 
 
 def test_recognizes_instrumentation_result() -> None:

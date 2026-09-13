@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from conftest import write_config
 
 from aasg.config import load_config, render_template, resolve_inside
@@ -12,11 +13,47 @@ from aasg.errors import ConfigurationError
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 2
+    assert config.schema_version == 3
     assert config.captures["home"].test == "example.HomeCaptureTest"
+    assert config.captures["home"].navigation == "ignore"
 
 
-@pytest.mark.parametrize("schema", [1, 3])
+@pytest.mark.parametrize("policy", ["gestural", "three-button", "all", "ignore"])
+def test_accepts_navigation_policies(tmp_path: Path, policy: str) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["navigation"] = policy
+    if policy == "all":
+        capture["artifacts"][0]["publish"] = (
+            "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
+        )
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert load_config(path).captures["home"].navigation == policy
+
+
+def test_rejects_invalid_navigation_policy(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["navigation"] = "two-button"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match="navigation"):
+        load_config(path)
+
+
+def test_all_navigation_requires_distinct_publication_paths(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["navigation"] = "all"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match=r"must contain \{navigation\}"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("schema", [1, 2, 4])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int
 ) -> None:
@@ -24,7 +61,7 @@ def test_rejects_unsupported_config_schema_with_migration_guidance(
 
     with pytest.raises(
         ConfigurationError,
-        match=rf"Unsupported configuration schema {schema}.*requires schema 2.*migrate",
+        match=rf"Unsupported configuration schema {schema}.*requires schema 3.*migrate",
     ):
         load_config(path)
 
@@ -73,6 +110,10 @@ def test_render_template() -> None:
     assert (
         render_template("{capture}/{locale}-{theme}", capture="home", locale="en", theme="dark")
         == "home/en-dark"
+    )
+    assert (
+        render_template("{capture}-{navigation}", capture="home", navigation="gestural")
+        == "home-gestural"
     )
 
 

@@ -15,9 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aasg.errors import CaptureError, PrerequisiteError
-from aasg.models import AndroidConfig, CaptureConfig
+from aasg.models import AndroidConfig, CaptureConfig, NavigationMode
 
 SECRET_PATTERN = re.compile(r"(?i)(password|token|secret|api[_-]?key)=([^\s]+)")
+NAVIGATION_OVERLAYS: dict[NavigationMode, str] = {
+    "gestural": "com.android.internal.systemui.navbar.gestural",
+    "three-button": "com.android.internal.systemui.navbar.threebutton",
+}
+NAVIGATION_MODES: tuple[NavigationMode, ...] = ("gestural", "three-button")
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,16 @@ class CommandResult:
     returncode: int
     duration_seconds: float
     output: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NavigationState:
+    available: tuple[NavigationMode, ...]
+    enabled: tuple[NavigationMode, ...]
+
+    @property
+    def active(self) -> NavigationMode | None:
+        return self.enabled[0] if len(self.enabled) == 1 else None
 
 
 def redact_serial(serial: str) -> str:
@@ -103,6 +118,54 @@ def active_user(adb: str, serial: str) -> int:
     if user < 0:
         raise PrerequisiteError(f"Android returned an invalid active user: {user}")
     return user
+
+
+def parse_navigation_state(output: str) -> NavigationState:
+    statuses: dict[NavigationMode, bool] = {}
+    for line in output.splitlines():
+        match = re.fullmatch(r"\s*\[(?P<state>[ x])\]\s+(?P<package>\S+)\s*", line)
+        if match is None:
+            continue
+        for mode, package in NAVIGATION_OVERLAYS.items():
+            if match.group("package") == package:
+                statuses[mode] = match.group("state") == "x"
+                break
+    available = tuple(mode for mode in NAVIGATION_MODES if mode in statuses)
+    enabled = tuple(mode for mode in NAVIGATION_MODES if statuses.get(mode))
+    return NavigationState(available, enabled)
+
+
+def navigation_state(adb: str, serial: str, user: int) -> NavigationState:
+    output = _run_text(
+        [adb, "-s", serial, "shell", "cmd", "overlay", "list", "--user", str(user), "android"]
+    )
+    return parse_navigation_state(output)
+
+
+def require_active_navigation(state: NavigationState) -> NavigationMode:
+    if state.active is None:
+        detected = ", ".join(state.enabled) or "none"
+        raise PrerequisiteError(
+            "Could not identify exactly one active Android navigation mode "
+            f"(enabled recognized modes: {detected})"
+        )
+    return state.active
+
+
+def navigation_switch_command(adb: str, serial: str, user: int, mode: NavigationMode) -> list[str]:
+    return adb_shell_command(
+        adb,
+        serial,
+        [
+            "cmd",
+            "overlay",
+            "enable-exclusive",
+            "--user",
+            str(user),
+            "--category",
+            NAVIGATION_OVERLAYS[mode],
+        ],
+    )
 
 
 def select_device(devices: list[Device], requested: str | None) -> Device:
@@ -253,6 +316,141 @@ def run_supervised(
         _terminate_process_group(process)
         raise
     return CommandResult(process.wait(), time.monotonic() - started, tuple(captured))
+
+
+class NavigationController:
+    def __init__(
+        self,
+        *,
+        adb: str,
+        serial: str,
+        user: int,
+        cwd: Path,
+        log_path: Path,
+        available: tuple[NavigationMode, ...],
+        original_mode: NavigationMode,
+        verbose: bool = False,
+        verify_timeout_seconds: float = 10,
+        settle_seconds: float = 0.5,
+    ) -> None:
+        self.adb = adb
+        self.serial = serial
+        self.user = user
+        self.cwd = cwd
+        self.log_path = log_path
+        self.available = available
+        self.original_mode = original_mode
+        self.current_mode = original_mode
+        self.verbose = verbose
+        self.verify_timeout_seconds = verify_timeout_seconds
+        self.settle_seconds = settle_seconds
+        self.events: list[dict[str, object]] = []
+
+    @classmethod
+    def inspect(
+        cls,
+        *,
+        adb: str,
+        serial: str,
+        user: int,
+        cwd: Path,
+        log_path: Path,
+        verbose: bool = False,
+    ) -> NavigationController:
+        state = navigation_state(adb, serial, user)
+        original = require_active_navigation(state)
+        return cls(
+            adb=adb,
+            serial=serial,
+            user=user,
+            cwd=cwd,
+            log_path=log_path,
+            available=state.available,
+            original_mode=original,
+            verbose=verbose,
+        )
+
+    def require_modes(self, modes: set[NavigationMode]) -> None:
+        missing = modes - set(self.available)
+        if missing:
+            raise PrerequisiteError(
+                "Device does not expose the required Android navigation overlay(s): "
+                + ", ".join(sorted(missing))
+            )
+
+    def ensure(self, mode: NavigationMode, *, action: str = "switch") -> dict[str, object]:
+        if mode not in self.available:
+            raise PrerequisiteError(f"Device does not expose Android navigation mode {mode!r}")
+        observed = navigation_state(self.adb, self.serial, self.user)
+        current = require_active_navigation(observed)
+        self.current_mode = current
+        if current == mode:
+            event: dict[str, object] = {
+                "action": action,
+                "mode": mode,
+                "status": "unchanged",
+            }
+            self.events.append(event)
+            return event
+
+        command = navigation_switch_command(self.adb, self.serial, self.user, mode)
+        event = {
+            "action": action,
+            "mode": mode,
+            "status": "failed",
+            "command": [
+                redact_serial(self.serial) if value == self.serial else value for value in command
+            ],
+        }
+        started = time.monotonic()
+        try:
+            result = run_supervised(
+                command,
+                cwd=self.cwd,
+                timeout_seconds=max(1, int(self.verify_timeout_seconds)),
+                log_path=self.log_path,
+                serial=self.serial,
+                on_line=print if self.verbose else None,
+                append=self.log_path.exists(),
+            )
+            if result.returncode:
+                raise PrerequisiteError(
+                    f"Android navigation switch returned {result.returncode} for {mode!r}"
+                )
+            deadline = time.monotonic() + self.verify_timeout_seconds
+            while time.monotonic() < deadline:
+                verified = navigation_state(self.adb, self.serial, self.user)
+                if verified.active == mode:
+                    self.current_mode = mode
+                    if self.settle_seconds:
+                        time.sleep(self.settle_seconds)
+                    event["status"] = "succeeded"
+                    event["duration_seconds"] = time.monotonic() - started
+                    self.events.append(event)
+                    return event
+                time.sleep(0.1)
+            raise PrerequisiteError(
+                f"Timed out waiting for Android navigation mode {mode!r} to become active"
+            )
+        except CaptureError as error:
+            event["error"] = str(error)
+            self.events.append(event)
+            raise PrerequisiteError(
+                f"Could not switch Android navigation mode to {mode!r}"
+            ) from error
+        except Exception as error:
+            event["error"] = str(error)
+            self.events.append(event)
+            raise
+
+    def restore(self) -> dict[str, object]:
+        return self.ensure(self.original_mode, action="restore")
+
+    def manual_restore_guidance(self) -> str:
+        command = navigation_switch_command(
+            self.adb, "<device-serial>", self.user, self.original_mode
+        )
+        return shlex.join(command)
 
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:
