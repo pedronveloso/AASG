@@ -25,6 +25,7 @@ dist/
 # JavaScript tooling
 node_modules/
 npm-debug.log*
+.husky/_/
 
 # Local environment and editor files
 .env
