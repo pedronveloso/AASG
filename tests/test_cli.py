@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from conftest import write_config
@@ -19,13 +20,20 @@ def test_version_option() -> None:
     assert result.stdout.strip() == __version__
 
 
+def test_package_versions_are_synchronized() -> None:
+    pyproject = Path(__file__).parents[1] / "pyproject.toml"
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+
+    assert project["version"] == __version__
+
+
 def test_config_validate(tmp_path: Path) -> None:
     path = write_config(tmp_path)
 
     result = runner.invoke(app, ["config", "validate", "--config", str(path)])
 
     assert result.exit_code == 0
-    assert "Valid schema 1" in result.output
+    assert "Valid schema 2" in result.output
 
 
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:

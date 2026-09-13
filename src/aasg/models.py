@@ -138,6 +138,7 @@ class DeviceFrameStep(StrictModel):
     frame: str
     fit: Literal["contain", "cover", "stretch"] = "cover"
     background: str | dict[str, str] | None = None
+    crop_to_frame: bool = False
 
     @model_validator(mode="after")
     def safe_frame_id(self) -> DeviceFrameStep:
@@ -213,9 +214,11 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
+CONFIG_SCHEMA_VERSION = 2
+
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[1] = Field(alias="schema")
+    schema_version: Literal[2] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig

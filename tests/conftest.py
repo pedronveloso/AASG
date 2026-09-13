@@ -7,7 +7,7 @@ import yaml
 
 def write_config(root: Path, overrides: dict[str, object] | None = None) -> Path:
     data: dict[str, object] = {
-        "schema": 1,
+        "schema": 2,
         "project": {
             "artifact_root": "artifacts",
             "run_log_root": "artifacts/aasg/runs",

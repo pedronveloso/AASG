@@ -12,8 +12,21 @@ from aasg.errors import ConfigurationError
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 1
+    assert config.schema_version == 2
     assert config.captures["home"].test == "example.HomeCaptureTest"
+
+
+@pytest.mark.parametrize("schema", [1, 3])
+def test_rejects_unsupported_config_schema_with_migration_guidance(
+    tmp_path: Path, schema: int
+) -> None:
+    path = write_config(tmp_path, {"schema": schema})
+
+    with pytest.raises(
+        ConfigurationError,
+        match=rf"Unsupported configuration schema {schema}.*requires schema 2.*migrate",
+    ):
+        load_config(path)
 
 
 def test_rejects_unknown_fields(tmp_path: Path) -> None:

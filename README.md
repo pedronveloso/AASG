@@ -101,12 +101,16 @@ redact a named region without duplicating UI coordinates on the host.
 
 ## Configuration
 
-`aasg.yaml` is strict and versioned. Unknown fields, missing references, unsafe paths, and invalid
-pipeline combinations fail before a test starts. All relative paths resolve from the configuration
-file.
+`aasg.yaml` is strict and versioned. Unknown fields, missing references, unsafe paths, incompatible
+schema versions, and invalid pipeline combinations fail before a test starts. All relative paths
+resolve from the configuration file.
+
+AASG 0.2 uses configuration schema 2. To migrate a schema 1 configuration, change its top-level
+`schema` value to `2`. Existing behavior is preserved because the new `crop_to_frame` option
+defaults to `false`; enable it explicitly on the desired `device_frame` steps.
 
 ```yaml
-schema: 1
+schema: 2
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -156,6 +160,7 @@ pipelines:
         source: community
         frame: android-phone/pixel-8/hazel
         fit: cover
+        crop_to_frame: true
 
 frame_sources:
   community:
@@ -166,7 +171,9 @@ frame_sources:
 Artifact `source` is an exact suffix inside the AGP additional-output tree. `publish` and rendition
 paths stay under `project.artifact_root`. Available typed operations are `resize`, `crop`, `pad`,
 `background`, `blur`, `redact`, `device_frame`, `edge_fade`, `feather`, `trim`, and
-`temporal_fade`.
+`temporal_fade`. A `device_frame` step can set `crop_to_frame: true` to remove fully transparent
+canvas margins while preserving every non-zero alpha pixel in the frame artwork. It defaults to
+`false`.
 
 Process an existing file through any named pipeline:
 
@@ -233,11 +240,15 @@ See [AGENTS.md](AGENTS.md) for repository conventions.
 
 ## Versioning
 
-AASG follows [Semantic Versioning 2.0.0](https://semver.org/). Until version 1.0.0, incompatible
-changes may be released in a new minor version. Patch releases remain reserved for
-backwards-compatible fixes. The `feat`, `fix`, and breaking-change markers in Conventional Commit
-messages record the intended release impact; before 1.0.0, breaking markers follow the minor-version
-policy above.
+AASG follows [Semantic Versioning 2.0.0](https://semver.org/). Every completed feature increments
+the application version; feature releases increment the minor version and backwards-compatible
+fixes increment the patch version. Until version 1.0.0, incompatible changes also increment the
+minor version.
+
+The YAML schema has its own integer version. Adding, removing, renaming, or changing the meaning of
+any YAML definition increments that schema version in the model, starter configuration,
+documentation, tests, and pilot project configurations. This gives older AASG releases an explicit
+migration signal instead of leaving them to report an unknown-field error.
 
 ## Author
 
