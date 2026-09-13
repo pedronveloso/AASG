@@ -14,6 +14,7 @@ from aasg.android import (
     CommandResult,
     Device,
     NavigationController,
+    ShowTapsController,
     active_user,
     adb_shell_command,
     capture_logcat,
@@ -139,6 +140,18 @@ def capture_navigation_modes(
     return [None]
 
 
+def is_video_capture(capture: CaptureConfig) -> bool:
+    return any(artifact.type == "video" for artifact in capture.artifacts)
+
+
+def required_show_taps_values(config: AasgConfig, selection: Selection) -> set[bool]:
+    return {
+        capture.show_taps
+        for capture_id in selection.captures
+        if is_video_capture(capture := config.captures[capture_id])
+    }
+
+
 class CaptureRunner:
     def __init__(self, processor: MediaProcessor | None = None) -> None:
         self.processor = processor or MediaProcessor()
@@ -161,7 +174,7 @@ class CaptureRunner:
         run_root.mkdir(parents=True, exist_ok=True)
         additional_output = project_path(config_path, config.android.additional_output_dir)
         manifest: dict[str, Any] = {
-            "schema": 2,
+            "schema": 3,
             "run_id": run_id,
             "started_at": datetime.now(UTC).isoformat(),
             "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
@@ -183,6 +196,7 @@ class CaptureRunner:
         failed = 0
         env = {"ANDROID_SERIAL": device.serial}
         required_modes = required_navigation_modes(config, selection)
+        required_show_taps = required_show_taps_values(config, selection)
         navigation: NavigationController | None = None
         navigation_manifest: dict[str, Any]
         if required_modes and dry_run:
@@ -222,6 +236,12 @@ class CaptureRunner:
                     "restoration": {"status": "not-needed"},
                 }
                 manifest["navigation"] = navigation_manifest
+                manifest["show_taps"] = {
+                    "status": "not-started" if required_show_taps else "ignored",
+                    "required": sorted(required_show_taps),
+                    "events": [],
+                    "restoration": {"status": "not-needed"},
+                }
                 manifest["completed_at"] = datetime.now(UTC).isoformat()
                 manifest["assets"] = []
                 manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
@@ -235,6 +255,64 @@ class CaptureRunner:
                 "restoration": {"status": "not-needed"},
             }
         manifest["navigation"] = navigation_manifest
+
+        show_taps: ShowTapsController | None = None
+        show_taps_manifest: dict[str, Any]
+        if required_show_taps and dry_run:
+            show_taps_manifest = {
+                "status": "planned",
+                "required": sorted(required_show_taps),
+                "events": [],
+                "restoration": {"status": "planned"},
+            }
+        elif required_show_taps:
+            try:
+                user = navigation.user if navigation is not None else active_user(
+                    config.android.adb, device.serial
+                )
+                show_taps = ShowTapsController.inspect(
+                    adb=config.android.adb,
+                    serial=device.serial,
+                    user=user,
+                    cwd=project_root,
+                    log_path=run_root / "commands" / "show-taps.log",
+                    verbose=verbose,
+                )
+                show_taps_manifest = {
+                    "status": "managed",
+                    "required": sorted(required_show_taps),
+                    "original": {
+                        "present": show_taps.original_state.present,
+                        "value": show_taps.original_state.value,
+                    },
+                    "events": show_taps.events,
+                    "restoration": {"status": "pending"},
+                }
+            except Exception as error:
+                code = self._error_code(error)
+                show_taps_manifest = {
+                    "status": "failed",
+                    "required": sorted(required_show_taps),
+                    "error": str(error),
+                    "events": [],
+                    "restoration": {"status": "not-needed"},
+                }
+                if navigation is not None:
+                    navigation_manifest["restoration"] = {"status": "unchanged"}
+                manifest["show_taps"] = show_taps_manifest
+                manifest["completed_at"] = datetime.now(UTC).isoformat()
+                manifest["assets"] = []
+                manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
+                self._write_manifest(run_root, manifest)
+                return CaptureOutcome(run_root, 0, 1, code, manifest)
+        else:
+            show_taps_manifest = {
+                "status": "ignored",
+                "required": [],
+                "events": [],
+                "restoration": {"status": "not-needed"},
+            }
+        manifest["show_taps"] = show_taps_manifest
 
         if config.android.prepare_tasks:
             command = [config.android.gradle_wrapper, *config.android.prepare_tasks]
@@ -258,6 +336,8 @@ class CaptureRunner:
                     manifest["prepare_error"] = str(error)
                     if navigation is not None:
                         navigation_manifest["restoration"] = {"status": "unchanged"}
+                    if show_taps is not None:
+                        show_taps_manifest["restoration"] = {"status": "unchanged"}
                     manifest["completed_at"] = datetime.now(UTC).isoformat()
                     manifest["assets"] = []
                     manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
@@ -287,6 +367,7 @@ class CaptureRunner:
                                 theme=theme,
                                 navigation_mode=navigation_mode,
                                 navigation=navigation,
+                                show_taps=show_taps,
                                 dry_run=dry_run,
                                 verbose=verbose,
                             )
@@ -309,6 +390,17 @@ class CaptureRunner:
                         "manual_command": navigation.manual_restore_guidance(),
                     }
                 navigation_manifest["events"] = navigation.events
+            if show_taps is not None:
+                try:
+                    show_taps_manifest["restoration"] = show_taps.restore()
+                except Exception as error:
+                    restoration_error = restoration_error or error
+                    show_taps_manifest["restoration"] = {
+                        "status": "failed",
+                        "error": str(error),
+                        "manual_command": show_taps.manual_restore_guidance(),
+                    }
+                show_taps_manifest["events"] = show_taps.events
 
         exit_code = max(
             (int(variant.get("exit_code", 0)) for variant in manifest["variants"]),
@@ -346,6 +438,7 @@ class CaptureRunner:
         theme: str,
         navigation_mode: NavigationMode | None,
         navigation: NavigationController | None,
+        show_taps: ShowTapsController | None,
         dry_run: bool,
         verbose: bool,
     ) -> dict[str, Any]:
@@ -358,6 +451,8 @@ class CaptureRunner:
             "navigation_policy": capture.navigation,
             "navigation": navigation_id,
             "effective_navigation": navigation.current_mode if navigation is not None else None,
+            "show_taps": capture.show_taps if is_video_capture(capture) else None,
+            "effective_show_taps": None,
             "status": "failed",
             "artifacts": [],
         }
@@ -376,41 +471,80 @@ class CaptureRunner:
                     variant["effective_navigation"] = navigation_mode
                 else:
                     raise PrerequisiteError("Android navigation control was not initialized")
+            recording = is_video_capture(capture)
+            if recording and dry_run:
+                variant["effective_show_taps"] = capture.show_taps
             if not dry_run:
-                if direct:
-                    result, commands = self._run_direct_instrumentation(
-                        config=config,
-                        config_path=config_path,
-                        additional_output=additional_output,
-                        device=device,
-                        capture=capture,
-                        locale=locale,
-                        theme=theme,
-                        log_path=run_root / "commands" / f"{name}.log",
-                        timeout_seconds=capture.timeout_seconds
-                        or config.project.default_timeout_seconds,
-                        verbose=verbose,
-                    )
-                    variant["commands"] = commands
-                else:
-                    result = run_supervised(
-                        command,
-                        cwd=config_path.resolve().parent,
-                        timeout_seconds=capture.timeout_seconds
-                        or config.project.default_timeout_seconds,
-                        log_path=run_root / "commands" / f"{name}.log",
-                        env={"ANDROID_SERIAL": device.serial},
-                        serial=device.serial,
-                        on_line=print if verbose else None,
-                    )
-                variant["duration_seconds"] = result.duration_seconds
-                if result.returncode:
-                    capture_logcat(
-                        config.android.adb,
-                        device.serial,
-                        run_root / "commands" / f"{name}-logcat.log",
-                    )
-                    raise CaptureError(f"Instrumentation returned {result.returncode}")
+                command_error: Exception | None = None
+                interruption: KeyboardInterrupt | None = None
+                show_taps_restoration_error: Exception | None = None
+                try:
+                    if recording:
+                        if show_taps is None:
+                            raise PrerequisiteError(
+                                "Android Show taps control was not initialized"
+                            )
+                        variant["show_taps_event"] = show_taps.ensure(capture.show_taps)
+                        variant["effective_show_taps"] = show_taps.current_state.effective
+                    if direct:
+                        result, commands = self._run_direct_instrumentation(
+                            config=config,
+                            config_path=config_path,
+                            additional_output=additional_output,
+                            device=device,
+                            capture=capture,
+                            locale=locale,
+                            theme=theme,
+                            log_path=run_root / "commands" / f"{name}.log",
+                            timeout_seconds=capture.timeout_seconds
+                            or config.project.default_timeout_seconds,
+                            verbose=verbose,
+                        )
+                        variant["commands"] = commands
+                    else:
+                        result = run_supervised(
+                            command,
+                            cwd=config_path.resolve().parent,
+                            timeout_seconds=capture.timeout_seconds
+                            or config.project.default_timeout_seconds,
+                            log_path=run_root / "commands" / f"{name}.log",
+                            env={"ANDROID_SERIAL": device.serial},
+                            serial=device.serial,
+                            on_line=print if verbose else None,
+                        )
+                    variant["duration_seconds"] = result.duration_seconds
+                    if result.returncode:
+                        capture_logcat(
+                            config.android.adb,
+                            device.serial,
+                            run_root / "commands" / f"{name}-logcat.log",
+                        )
+                        raise CaptureError(f"Instrumentation returned {result.returncode}")
+                except KeyboardInterrupt as error:
+                    interruption = error
+                except Exception as error:
+                    command_error = error
+                finally:
+                    if recording and show_taps is not None:
+                        try:
+                            variant["show_taps_restoration"] = show_taps.restore()
+                        except Exception as error:
+                            show_taps_restoration_error = error
+                            variant["show_taps_restoration"] = {
+                                "status": "failed",
+                                "error": str(error),
+                                "manual_command": show_taps.manual_restore_guidance(),
+                            }
+                if interruption is not None:
+                    raise interruption
+                if command_error is not None:
+                    if show_taps_restoration_error is not None:
+                        variant["show_taps_restoration_error"] = str(
+                            show_taps_restoration_error
+                        )
+                    raise command_error
+                if show_taps_restoration_error is not None:
+                    raise show_taps_restoration_error
             staged, publications = self._collect_variant(
                 config,
                 config_path,

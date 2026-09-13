@@ -46,7 +46,7 @@ def test_config_validate(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "validate", "--config", str(path)])
 
     assert result.exit_code == 0
-    assert "Valid schema 3" in result.output
+    assert "Valid schema 4" in result.output
 
 
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:
@@ -83,6 +83,31 @@ def test_capture_prints_relative_planned_asset_paths(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Planned assets:" in result.output
     assert "artifacts/screenshots/raw/en/home-light.png" in result.output
+
+
+def test_show_taps_is_not_an_interactive_capture_choice(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["artifacts"][0]["type"] = "video"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "home",
+            "--config",
+            str(path),
+            "--locale",
+            "en",
+            "--theme",
+            "light",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Show taps" not in result.output
 
 
 def test_capture_json_includes_relative_asset_paths(tmp_path: Path) -> None:

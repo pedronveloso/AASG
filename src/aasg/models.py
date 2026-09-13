@@ -85,7 +85,17 @@ class CaptureConfig(StrictModel):
     locales: list[str] | None = None
     themes: list[str] | None = None
     navigation: NavigationPolicy = "ignore"
+    show_taps: bool = True
     artifacts: list[ArtifactConfig]
+
+    @model_validator(mode="after")
+    def recordings_do_not_mix_visual_media(self) -> CaptureConfig:
+        artifact_types = {artifact.type for artifact in self.artifacts}
+        if "video" in artifact_types and "image" in artifact_types:
+            raise ValueError(
+                "captures with video artifacts may include JSON artifacts, but not image artifacts"
+            )
+        return self
 
 
 class ResizeStep(StrictModel):
@@ -219,11 +229,11 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
-CONFIG_SCHEMA_VERSION = 3
+CONFIG_SCHEMA_VERSION = 4
 
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[3] = Field(alias="schema")
+    schema_version: Literal[4] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig

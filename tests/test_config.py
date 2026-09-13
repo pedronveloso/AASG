@@ -13,9 +13,50 @@ from aasg.errors import ConfigurationError
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 3
+    assert config.schema_version == 4
     assert config.captures["home"].test == "example.HomeCaptureTest"
     assert config.captures["home"].navigation == "ignore"
+    assert config.captures["home"].show_taps is True
+
+
+def test_accepts_disabled_show_taps_for_video_capture(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["show_taps"] = False
+    capture["artifacts"][0]["type"] = "video"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert load_config(path).captures["home"].show_taps is False
+
+
+def test_rejects_capture_with_video_and_image_artifacts(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    video = capture["artifacts"][0].copy()
+    video.update({"id": "walkthrough", "type": "video"})
+    capture["artifacts"].append(video)
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match="video artifacts.*not image artifacts"):
+        load_config(path)
+
+
+def test_accepts_capture_with_video_and_json_artifacts(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["artifacts"][0]["type"] = "video"
+    metadata = capture["artifacts"][0].copy()
+    metadata.update({"id": "timeline", "type": "json"})
+    capture["artifacts"].append(metadata)
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert [artifact.type for artifact in load_config(path).captures["home"].artifacts] == [
+        "video",
+        "json",
+    ]
 
 
 @pytest.mark.parametrize("policy", ["gestural", "three-button", "all", "ignore"])
@@ -53,7 +94,7 @@ def test_all_navigation_requires_distinct_publication_paths(tmp_path: Path) -> N
         load_config(path)
 
 
-@pytest.mark.parametrize("schema", [1, 2, 4])
+@pytest.mark.parametrize("schema", [1, 2, 3, 5])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int
 ) -> None:
@@ -61,7 +102,7 @@ def test_rejects_unsupported_config_schema_with_migration_guidance(
 
     with pytest.raises(
         ConfigurationError,
-        match=rf"Unsupported configuration schema {schema}.*requires schema 3.*migrate",
+        match=rf"Unsupported configuration schema {schema}.*requires schema 4.*migrate",
     ):
         load_config(path)
 

@@ -11,6 +11,8 @@ from aasg.android import (
     Device,
     NavigationController,
     NavigationState,
+    ShowTapsController,
+    ShowTapsState,
     active_user,
     discover_devices,
     gradle_command,
@@ -18,9 +20,12 @@ from aasg.android import (
     instrumentation_succeeded,
     navigation_switch_command,
     parse_navigation_state,
+    parse_show_taps_state,
     require_active_navigation,
     run_supervised,
     select_device,
+    show_taps_state,
+    show_taps_update_command,
 )
 from aasg.errors import CaptureError, PrerequisiteError
 from aasg.models import AndroidConfig, CaptureConfig, DirectInstrumentationConfig
@@ -109,6 +114,133 @@ def test_reads_and_validates_active_android_user(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(android, "_run_text", lambda command: "-2\n")
     with pytest.raises(PrerequisiteError, match="invalid active user"):
         active_user("adb", "ABC")
+
+
+def test_parses_show_taps_state_and_builds_active_user_commands() -> None:
+    assert parse_show_taps_state("null\n") == ShowTapsState(False, None)
+    assert parse_show_taps_state("0\r\n") == ShowTapsState(True, False)
+    assert parse_show_taps_state("1\n") == ShowTapsState(True, True)
+    assert show_taps_update_command("adb", "ABC", 10, True) == [
+        "adb",
+        "-s",
+        "ABC",
+        "shell",
+        "settings --user 10 put system show_touches 1",
+    ]
+    assert show_taps_update_command("adb", "ABC", 10, None)[-1] == (
+        "settings --user 10 delete system show_touches"
+    )
+
+
+def test_reads_show_taps_for_active_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def run(command):  # type: ignore[no-untyped-def]
+        commands.append(list(command))
+        return "1\n"
+
+    monkeypatch.setattr(android, "_run_text", run)
+
+    assert show_taps_state("adb", "ABC", 10) == ShowTapsState(True, True)
+    assert commands == [
+        [
+            "adb",
+            "-s",
+            "ABC",
+            "shell",
+            "settings --user 10 get system show_touches",
+        ]
+    ]
+
+
+def test_rejects_invalid_show_taps_state() -> None:
+    with pytest.raises(PrerequisiteError, match="invalid Show taps value"):
+        parse_show_taps_state("enabled")
+
+
+def test_show_taps_controller_enables_and_restores_unset_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    states = iter(
+        [
+            ShowTapsState(False, None),
+            ShowTapsState(True, True),
+            ShowTapsState(True, True),
+            ShowTapsState(False, None),
+        ]
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(android, "show_taps_state", lambda *args: next(states))
+
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
+        commands.append(list(command))
+        return CommandResult(0, 0.1)
+
+    monkeypatch.setattr(android, "run_supervised", run)
+    controller = ShowTapsController(
+        adb="adb",
+        serial="ABC",
+        user=10,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(False, None),
+    )
+
+    assert controller.ensure(True)["status"] == "succeeded"
+    assert controller.current_state.effective is True
+    assert controller.restore()["status"] == "succeeded"
+    assert commands[0][-1].endswith("put system show_touches 1")
+    assert commands[1][-1].endswith("delete system show_touches")
+    assert "<device-serial>" in controller.manual_restore_guidance()
+
+
+def test_show_taps_controller_skips_matching_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        android,
+        "show_taps_state",
+        lambda *args: ShowTapsState(True, False),
+    )
+    controller = ShowTapsController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(True, False),
+    )
+
+    assert controller.ensure(False)["status"] == "unchanged"
+    assert not (tmp_path / "show-taps.log").exists()
+
+
+def test_show_taps_controller_reports_verification_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        android,
+        "show_taps_state",
+        lambda *args: ShowTapsState(True, False),
+    )
+    monkeypatch.setattr(
+        android,
+        "run_supervised",
+        lambda *args, **kwargs: CommandResult(0, 0.1),
+    )
+    controller = ShowTapsController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(True, False),
+        verify_timeout_seconds=0,
+    )
+
+    with pytest.raises(PrerequisiteError, match="Timed out"):
+        controller.ensure(True)
+    assert controller.events[-1]["status"] == "failed"
 
 
 def test_parses_android_navigation_overlays() -> None:

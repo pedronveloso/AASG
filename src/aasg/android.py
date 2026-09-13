@@ -57,6 +57,16 @@ class NavigationState:
         return self.enabled[0] if len(self.enabled) == 1 else None
 
 
+@dataclass(frozen=True)
+class ShowTapsState:
+    present: bool
+    value: bool | None
+
+    @property
+    def effective(self) -> bool:
+        return bool(self.value) if self.present else False
+
+
 def redact_serial(serial: str) -> str:
     return f"…{serial[-4:]}" if len(serial) > 4 else "…"
 
@@ -166,6 +176,43 @@ def navigation_switch_command(adb: str, serial: str, user: int, mode: Navigation
             NAVIGATION_OVERLAYS[mode],
         ],
     )
+
+
+def parse_show_taps_state(output: str) -> ShowTapsState:
+    value = output.strip().replace("\r", "")
+    if value == "null":
+        return ShowTapsState(False, None)
+    if value == "0":
+        return ShowTapsState(True, False)
+    if value == "1":
+        return ShowTapsState(True, True)
+    raise PrerequisiteError(f"Android returned an invalid Show taps value: {value!r}")
+
+
+def show_taps_state(adb: str, serial: str, user: int) -> ShowTapsState:
+    try:
+        return parse_show_taps_state(
+            _run_text(
+                adb_shell_command(
+                    adb,
+                    serial,
+                    ["settings", "--user", str(user), "get", "system", "show_touches"],
+                )
+            )
+        )
+    except PrerequisiteError as error:
+        raise PrerequisiteError(
+            "Could not read Android Show taps for the active user"
+        ) from error
+
+
+def show_taps_update_command(
+    adb: str, serial: str, user: int, value: bool | None
+) -> list[str]:
+    operation = ["delete", "system", "show_touches"]
+    if value is not None:
+        operation = ["put", "system", "show_touches", "1" if value else "0"]
+    return adb_shell_command(adb, serial, ["settings", "--user", str(user), *operation])
 
 
 def select_device(devices: list[Device], requested: str | None) -> Device:
@@ -451,6 +498,129 @@ class NavigationController:
             self.adb, "<device-serial>", self.user, self.original_mode
         )
         return shlex.join(command)
+
+
+class ShowTapsController:
+    def __init__(
+        self,
+        *,
+        adb: str,
+        serial: str,
+        user: int,
+        cwd: Path,
+        log_path: Path,
+        original_state: ShowTapsState,
+        verbose: bool = False,
+        verify_timeout_seconds: float = 10,
+    ) -> None:
+        self.adb = adb
+        self.serial = serial
+        self.user = user
+        self.cwd = cwd
+        self.log_path = log_path
+        self.original_state = original_state
+        self.current_state = original_state
+        self.verbose = verbose
+        self.verify_timeout_seconds = verify_timeout_seconds
+        self.events: list[dict[str, object]] = []
+
+    @classmethod
+    def inspect(
+        cls,
+        *,
+        adb: str,
+        serial: str,
+        user: int,
+        cwd: Path,
+        log_path: Path,
+        verbose: bool = False,
+    ) -> ShowTapsController:
+        return cls(
+            adb=adb,
+            serial=serial,
+            user=user,
+            cwd=cwd,
+            log_path=log_path,
+            original_state=show_taps_state(adb, serial, user),
+            verbose=verbose,
+        )
+
+    def ensure(
+        self,
+        value: bool | None,
+        *,
+        action: str = "set",
+    ) -> dict[str, object]:
+        target = ShowTapsState(value is not None, value)
+        observed = show_taps_state(self.adb, self.serial, self.user)
+        self.current_state = observed
+        if observed == target:
+            event: dict[str, object] = {
+                "action": action,
+                "value": value,
+                "status": "unchanged",
+            }
+            self.events.append(event)
+            return event
+
+        command = show_taps_update_command(self.adb, self.serial, self.user, value)
+        event = {
+            "action": action,
+            "value": value,
+            "status": "failed",
+            "command": [
+                redact_serial(self.serial) if item == self.serial else item for item in command
+            ],
+        }
+        started = time.monotonic()
+        try:
+            result = run_supervised(
+                command,
+                cwd=self.cwd,
+                timeout_seconds=max(1, int(self.verify_timeout_seconds)),
+                log_path=self.log_path,
+                serial=self.serial,
+                on_line=print if self.verbose else None,
+                append=self.log_path.exists(),
+            )
+            if result.returncode:
+                raise PrerequisiteError(
+                    f"Android Show taps update returned {result.returncode}"
+                )
+            deadline = time.monotonic() + self.verify_timeout_seconds
+            while True:
+                verified = show_taps_state(self.adb, self.serial, self.user)
+                if verified == target:
+                    self.current_state = target
+                    event["status"] = "succeeded"
+                    event["duration_seconds"] = time.monotonic() - started
+                    self.events.append(event)
+                    return event
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.1)
+            raise PrerequisiteError("Timed out waiting for Android Show taps to change")
+        except CaptureError as error:
+            event["error"] = str(error)
+            self.events.append(event)
+            raise PrerequisiteError("Could not update Android Show taps") from error
+        except Exception as error:
+            event["error"] = str(error)
+            self.events.append(event)
+            raise
+
+    def restore(self) -> dict[str, object]:
+        return self.ensure(self.original_state.value, action="restore")
+
+    def manual_restore_guidance(self) -> str:
+        return shlex.join(
+            show_taps_update_command(
+                self.adb,
+                "<device-serial>",
+                self.user,
+                self.original_state.value,
+            )
+        )
 
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:
