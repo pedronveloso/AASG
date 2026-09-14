@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import string
 from collections.abc import Mapping
+from itertools import pairwise
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -191,6 +192,16 @@ class TemporalFadeStep(StrictModel):
     out_seconds: float = Field(default=0, ge=0)
 
 
+class GestureOverlayStep(StrictModel):
+    type: Literal["gesture_overlay"]
+    color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$")
+    halo_color: str = Field(default="#000000A0", pattern=r"^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$")
+    radius_px: int = Field(default=44, gt=0)
+    trail: bool = True
+    timing_offset_ms: int = Field(default=0, ge=-10_000, le=10_000)
+    motion: Literal["standard", "reduced"] = "standard"
+
+
 PipelineStep = Annotated[
     ResizeStep
     | CropStep
@@ -202,7 +213,8 @@ PipelineStep = Annotated[
     | EdgeFadeStep
     | FeatherStep
     | TrimStep
-    | TemporalFadeStep,
+    | TemporalFadeStep
+    | GestureOverlayStep,
     Field(discriminator="type"),
 ]
 
@@ -211,6 +223,17 @@ class PipelineConfig(StrictModel):
     steps: list[PipelineStep]
     frame_rate: int = Field(default=30, gt=0)
     crf: int = Field(default=18, ge=0, le=51)
+
+    @model_validator(mode="after")
+    def gesture_overlay_uses_source_coordinates(self) -> PipelineConfig:
+        gesture_indexes = [
+            index for index, step in enumerate(self.steps) if isinstance(step, GestureOverlayStep)
+        ]
+        if len(gesture_indexes) > 1:
+            raise ValueError("a pipeline may contain only one gesture_overlay step")
+        if gesture_indexes and gesture_indexes[0] != 0:
+            raise ValueError("gesture_overlay must be the first pipeline step")
+        return self
 
 
 class RemoteFrameSource(StrictModel):
@@ -230,7 +253,7 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 
 
 def _has_template_field(template: str, field: str) -> bool:
@@ -238,7 +261,7 @@ def _has_template_field(template: str, field: str) -> bool:
 
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[4] = Field(alias="schema")
+    schema_version: Literal[5] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig
@@ -293,6 +316,17 @@ class AasgConfig(StrictModel):
                             f"artifact {artifact.id!r} references unknown pipeline "
                             f"{rendition.pipeline!r}"
                         )
+                    pipeline = self.pipelines[rendition.pipeline]
+                    if any(isinstance(step, GestureOverlayStep) for step in pipeline.steps):
+                        if artifact.type != "video":
+                            raise ValueError("gesture_overlay supports video artifacts only")
+                        if artifact.metadata is None:
+                            raise ValueError("gesture_overlay requires artifact metadata")
+                        if capture.show_taps:
+                            raise ValueError(
+                                "gesture_overlay requires show_taps: false to avoid "
+                                "duplicate markers"
+                            )
         for pipeline_id, pipeline in self.pipelines.items():
             for step in pipeline.steps:
                 if isinstance(step, DeviceFrameStep) and step.source not in self.frame_sources:
@@ -309,10 +343,95 @@ class Region(StrictModel):
     height: int = Field(gt=0)
 
 
+class GestureCoordinateSpace(StrictModel):
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    origin: Literal["top-left"]
+
+
+class GesturePoint(StrictModel):
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+
+
+class TimedGesturePoint(GesturePoint):
+    offset_ms: int = Field(ge=0)
+
+
+class TapGesture(StrictModel):
+    type: Literal["tap"]
+    at_ms: int = Field(ge=0)
+    cue_lead_ms: int = Field(default=0, ge=0)
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+
+
+class SwipeGesture(StrictModel):
+    type: Literal["swipe"]
+    at_ms: int = Field(ge=0)
+    cue_lead_ms: int = Field(default=0, ge=0)
+    duration_ms: int = Field(gt=0)
+    from_: GesturePoint = Field(alias="from")
+    to: GesturePoint
+
+
+class DragGesture(StrictModel):
+    type: Literal["drag"]
+    at_ms: int = Field(ge=0)
+    cue_lead_ms: int = Field(default=0, ge=0)
+    points: list[TimedGesturePoint] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def ordered_points(self) -> DragGesture:
+        if self.points[0].offset_ms != 0:
+            raise ValueError("drag must start at offset_ms 0")
+        offsets = [point.offset_ms for point in self.points]
+        if any(first >= second for first, second in pairwise(offsets)):
+            raise ValueError("drag point offsets must be strictly increasing")
+        return self
+
+
+GestureEvent = Annotated[TapGesture | SwipeGesture | DragGesture, Field(discriminator="type")]
+
+
 class SemanticMetadata(StrictModel):
-    schema_version: Literal[1] = Field(alias="schema")
+    schema_version: Literal[1, 2] = Field(alias="schema")
     media: str
-    regions: dict[str, Region]
+    regions: dict[str, Region] = Field(default_factory=dict)
+    coordinate_space: GestureCoordinateSpace | None = None
+    gestures: list[GestureEvent] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def versioned_gestures(self) -> SemanticMetadata:
+        if self.schema_version == 1:
+            if "regions" not in self.model_fields_set:
+                raise ValueError("semantic metadata schema 1 requires regions")
+            if {"coordinate_space", "gestures"} & self.model_fields_set:
+                raise ValueError("semantic metadata schema 1 does not support gesture timelines")
+            return self
+        if self.coordinate_space is None:
+            raise ValueError("semantic metadata schema 2 requires coordinate_space")
+        if any(first.at_ms > second.at_ms for first, second in pairwise(self.gestures)):
+            raise ValueError("gesture events must be sorted by at_ms")
+        for event in self.gestures:
+            if isinstance(event, TapGesture):
+                points: list[GesturePoint | TimedGesturePoint] = [
+                    GesturePoint(x=event.x, y=event.y)
+                ]
+            elif isinstance(event, SwipeGesture):
+                points = [event.from_, event.to]
+            else:
+                points = list(event.points)
+            for point in points:
+                if (
+                    point.x >= self.coordinate_space.width
+                    or point.y >= self.coordinate_space.height
+                ):
+                    raise ValueError(
+                        f"gesture point ({point.x}, {point.y}) exceeds coordinate_space "
+                        f"{self.coordinate_space.width}x{self.coordinate_space.height}"
+                    )
+        return self
 
 
 class FrameGeometry(StrictModel):

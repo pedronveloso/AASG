@@ -106,7 +106,7 @@ def project_path(config_path: Path, value: str) -> Path:
 
 
 STARTER_CONFIG = """# AASG configuration. Paths are relative to this file.
-schema: 4
+schema: 5
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs

@@ -30,4 +30,27 @@ PlatformTestStorageRegistry.getInstance()
 ```
 
 Call `start()` only after recording is active. Coordinates are source-video pixels with a top-left
-origin. Swipe and drag durations must match the duration used by the caller-owned test action.
+origin. The helper rejects coordinates outside that source space. Swipe and drag durations must
+match the duration used by the caller-owned test action.
+
+`GesturePacing()` defaults to a 700 ms pre-action hold, a 120 ms visual cue lead, and a 900 ms
+post-action hold. Pass a different pacing value when the product needs longer reading time, while
+keeping the same values throughout a capture series for consistent rhythm.
+
+The recording dimensions, orientation, display scaling, and system-bar treatment must remain fixed
+for a journey. If the recorder crops or rotates its output, transform coordinates before passing
+them to the timeline. Avoid placing gestures under captions or near store-safe-area edges. AASG
+validates the sidecar against the decoded video and rejects timing drift that would push an animation
+past the end of the clip.
+
+## Publishing
+
+The module is a Kotlin/JVM library so it can be consumed by Android instrumentation tests without
+imposing an Android Gradle Plugin or minimum-SDK version. A non-prerelease GitHub release tagged
+with the shared AASG version publishes signed artifacts to Maven Central. The repository must first
+have the `com.pedronveloso.aasg` namespace verified in the Central Portal and these Actions secrets:
+
+- `MAVEN_CENTRAL_USERNAME`
+- `MAVEN_CENTRAL_PASSWORD`
+- `MAVEN_SIGNING_KEY`
+- `MAVEN_SIGNING_PASSWORD`

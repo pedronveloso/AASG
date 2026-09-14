@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -43,12 +44,49 @@ def test_dry_run_writes_resolved_manifest(tmp_path: Path) -> None:
     )
 
     assert outcome.failed == 0
-    assert outcome.manifest["schema"] == 3
+    assert outcome.manifest["schema"] == 4
     assert outcome.manifest["navigation"]["status"] == "ignored"
     assert outcome.manifest["show_taps"]["status"] == "ignored"
     assert outcome.manifest["variants"][0]["status"] == "succeeded"
     assert outcome.manifest["assets"] == ["artifacts/screenshots/raw/en/home-light.png"]
     assert (outcome.run_root / "run.json").is_file()
+
+
+def test_collected_artifact_records_semantic_metadata_checksum(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    artifact = data["captures"]["home"]["artifacts"][0]
+    artifact["metadata"] = "screenshots/{locale}/home-{theme}.metadata.json"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    config = load_config(path)
+    additional_output = tmp_path / config.android.additional_output_dir
+    source = additional_output / "worker" / "screenshots" / "en" / "home-light.png"
+    metadata = source.with_name("home-light.metadata.json")
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"image")
+    metadata.write_text('{"schema": 1, "media": "home-light.png", "regions": {}}')
+    runner = CaptureRunner()
+    monkeypatch.setattr(runner, "_validate", lambda *args: None)
+
+    records, _ = runner._collect_variant(
+        config,
+        path,
+        tmp_path / "artifacts",
+        additional_output,
+        tmp_path / "run",
+        "home",
+        config.captures["home"],
+        "en",
+        "light",
+        "ignore",
+        {},
+        False,
+    )
+
+    assert records[0]["metadata"] == {
+        "source": "screenshots/en/home-light.metadata.json",
+        "sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
+    }
 
 
 def configured_video_path(tmp_path: Path, *, show_taps: bool = True) -> Path:

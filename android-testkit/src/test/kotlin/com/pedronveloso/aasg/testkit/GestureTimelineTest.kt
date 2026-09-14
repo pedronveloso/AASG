@@ -87,4 +87,18 @@ class GestureTimelineTest {
             ) {}
         }
     }
+
+    @Test
+    fun `rejects coordinates outside the source video`() {
+        val timeline = GestureTimeline(
+            media = "demo.mp4",
+            width = 100,
+            height = 200,
+            output = ByteArrayOutputStream(),
+        ).start()
+
+        assertFailsWith<IllegalArgumentException> {
+            timeline.tap(GesturePoint(100, 20)) {}
+        }
+    }
 }

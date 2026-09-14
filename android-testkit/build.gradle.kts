@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.pedronveloso.aasg"
-version = "0.5.0"
+version = providers.gradleProperty("VERSION_NAME").get()
 
 repositories {
     mavenCentral()

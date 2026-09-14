@@ -114,6 +114,7 @@ public class GestureTimeline(
         point: GesturePoint,
         action: () -> Unit,
     ) {
+        requireInBounds(point)
         perform(
             event = { atMs -> GestureEvent.Tap(atMs, pacing.cueLeadMs, point) },
             action = action,
@@ -127,6 +128,8 @@ public class GestureTimeline(
         action: () -> Unit,
     ) {
         require(durationMs > 0) { "durationMs must be positive" }
+        requireInBounds(from)
+        requireInBounds(to)
         perform(
             event = { atMs ->
                 GestureEvent.Swipe(atMs, pacing.cueLeadMs, durationMs, from, to)
@@ -144,6 +147,7 @@ public class GestureTimeline(
         require(points.zipWithNext().all { (first, second) -> first.offsetMs < second.offsetMs }) {
             "drag point offsets must be strictly increasing"
         }
+        points.forEach(::requireInBounds)
         perform(
             event = { atMs -> GestureEvent.Drag(atMs, pacing.cueLeadMs, points.toList()) },
             action = action,
@@ -180,6 +184,18 @@ public class GestureTimeline(
     private fun elapsedMs(): Long {
         val started = checkNotNull(startedAtNanos)
         return (clock.nowNanos() - started) / NANOS_PER_MILLISECOND
+    }
+
+    private fun requireInBounds(point: GesturePoint) {
+        require(point.x < width && point.y < height) {
+            "gesture point (${point.x}, ${point.y}) exceeds ${width}x$height"
+        }
+    }
+
+    private fun requireInBounds(point: TimedGesturePoint) {
+        require(point.x < width && point.y < height) {
+            "gesture point (${point.x}, ${point.y}) exceeds ${width}x$height"
+        }
     }
 
     private fun toJson(): String = buildString {

@@ -44,9 +44,19 @@ def test_package_versions_are_synchronized() -> None:
         if package["name"] == "android-auto-screengrabs"
         and package.get("source") == {"editable": "."}
     ]
+    testkit_properties = dict(
+        line.split("=", maxsplit=1)
+        for line in (root / "android-testkit" / "gradle.properties").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
 
     assert len(packages) == 1
-    assert project["version"] == packages[0]["version"] == __version__
+    assert (
+        project["version"]
+        == packages[0]["version"]
+        == testkit_properties["VERSION_NAME"]
+        == __version__
+    )
 
 
 def test_config_validate(tmp_path: Path) -> None:
@@ -55,7 +65,7 @@ def test_config_validate(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "validate", "--config", str(path)])
 
     assert result.exit_code == 0
-    assert "Valid schema 4" in result.output
+    assert "Valid schema 5" in result.output
 
 
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:
