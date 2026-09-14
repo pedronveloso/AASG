@@ -11,6 +11,8 @@ from aasg.android import (
     Device,
     NavigationController,
     NavigationState,
+    ShowTapsController,
+    ShowTapsState,
     active_user,
     discover_devices,
     gradle_command,
@@ -18,9 +20,12 @@ from aasg.android import (
     instrumentation_succeeded,
     navigation_switch_command,
     parse_navigation_state,
+    parse_show_taps_state,
     require_active_navigation,
     run_supervised,
     select_device,
+    show_taps_state,
+    show_taps_update_command,
 )
 from aasg.errors import CaptureError, PrerequisiteError
 from aasg.models import AndroidConfig, CaptureConfig, DirectInstrumentationConfig
@@ -103,12 +108,139 @@ def test_builds_direct_instrumentation_with_numeric_user_and_empty_argument() ->
 
 
 def test_reads_and_validates_active_android_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(android, "_run_text", lambda command: "0\n")
+    monkeypatch.setattr(android, "_run_text", lambda command, **kwargs: "0\n")
     assert active_user("adb", "ABC") == 0
 
-    monkeypatch.setattr(android, "_run_text", lambda command: "-2\n")
+    monkeypatch.setattr(android, "_run_text", lambda command, **kwargs: "-2\n")
     with pytest.raises(PrerequisiteError, match="invalid active user"):
         active_user("adb", "ABC")
+
+
+def test_parses_show_taps_state_and_builds_active_user_commands() -> None:
+    assert parse_show_taps_state("null\n") == ShowTapsState(False, None)
+    assert parse_show_taps_state("0\r\n") == ShowTapsState(True, False)
+    assert parse_show_taps_state("1\n") == ShowTapsState(True, True)
+    assert show_taps_update_command("adb", "ABC", 10, True) == [
+        "adb",
+        "-s",
+        "ABC",
+        "shell",
+        "settings --user 10 put system show_touches 1",
+    ]
+    assert show_taps_update_command("adb", "ABC", 10, None)[-1] == (
+        "settings --user 10 delete system show_touches"
+    )
+
+
+def test_reads_show_taps_for_active_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
+        commands.append(list(command))
+        return "1\n"
+
+    monkeypatch.setattr(android, "_run_text", run)
+
+    assert show_taps_state("adb", "ABC", 10) == ShowTapsState(True, True)
+    assert commands == [
+        [
+            "adb",
+            "-s",
+            "ABC",
+            "shell",
+            "settings --user 10 get system show_touches",
+        ]
+    ]
+
+
+def test_rejects_invalid_show_taps_state() -> None:
+    with pytest.raises(PrerequisiteError, match="invalid Show taps value"):
+        parse_show_taps_state("enabled")
+
+
+def test_show_taps_controller_enables_and_restores_unset_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    states = iter(
+        [
+            ShowTapsState(False, None),
+            ShowTapsState(True, True),
+            ShowTapsState(True, True),
+            ShowTapsState(False, None),
+        ]
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(android, "show_taps_state", lambda *args: next(states))
+
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
+        commands.append(list(command))
+        return CommandResult(0, 0.1)
+
+    monkeypatch.setattr(android, "run_supervised", run)
+    controller = ShowTapsController(
+        adb="adb",
+        serial="ABC",
+        user=10,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(False, None),
+    )
+
+    assert controller.ensure(True)["status"] == "succeeded"
+    assert controller.current_state.effective is True
+    assert controller.restore()["status"] == "succeeded"
+    assert commands[0][-1].endswith("put system show_touches 1")
+    assert commands[1][-1].endswith("delete system show_touches")
+    assert "<device-serial>" in controller.manual_restore_guidance()
+
+
+def test_show_taps_controller_skips_matching_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        android,
+        "show_taps_state",
+        lambda *args: ShowTapsState(True, False),
+    )
+    controller = ShowTapsController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(True, False),
+    )
+
+    assert controller.ensure(False)["status"] == "unchanged"
+    assert not (tmp_path / "show-taps.log").exists()
+
+
+def test_show_taps_controller_reports_verification_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        android,
+        "show_taps_state",
+        lambda *args: ShowTapsState(True, False),
+    )
+    monkeypatch.setattr(
+        android,
+        "run_supervised",
+        lambda *args, **kwargs: CommandResult(0, 0.1),
+    )
+    controller = ShowTapsController(
+        adb="adb",
+        serial="ABC",
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(True, False),
+        verify_timeout_seconds=0,
+    )
+
+    with pytest.raises(PrerequisiteError, match="Timed out"):
+        controller.ensure(True)
+    assert controller.events[-1]["status"] == "failed"
 
 
 def test_parses_android_navigation_overlays() -> None:
@@ -246,6 +378,72 @@ def test_navigation_controller_reports_verification_timeout(
     assert controller.events[-1]["status"] == "failed"
 
 
+def test_navigation_controller_redacts_failed_event_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serial = "device-serial-9876"
+    monkeypatch.setattr(
+        android,
+        "navigation_state",
+        lambda *args: NavigationState(("gestural", "three-button"), ("three-button",)),
+    )
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise CaptureError(f"Command timed out: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr(android, "run_supervised", fail)
+    controller = NavigationController(
+        adb="adb",
+        serial=serial,
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "navigation.log",
+        available=("gestural", "three-button"),
+        original_mode="three-button",
+        settle_seconds=0,
+    )
+
+    with pytest.raises(PrerequisiteError, match="Could not switch") as error:
+        controller.ensure("gestural")
+
+    assert serial not in str(error.value)
+    assert serial not in controller.events[-1]["error"]
+    assert "…9876" in controller.events[-1]["error"]
+    assert "token=<redacted>" in controller.events[-1]["error"]
+
+
+def test_show_taps_controller_redacts_failed_event_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serial = "device-serial-9876"
+    monkeypatch.setattr(
+        android,
+        "show_taps_state",
+        lambda *args: ShowTapsState(True, False),
+    )
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise CaptureError(f"Command timed out: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr(android, "run_supervised", fail)
+    controller = ShowTapsController(
+        adb="adb",
+        serial=serial,
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(True, False),
+    )
+
+    with pytest.raises(PrerequisiteError, match="Could not update") as error:
+        controller.ensure(True)
+
+    assert serial not in str(error.value)
+    assert serial not in controller.events[-1]["error"]
+    assert "…9876" in controller.events[-1]["error"]
+    assert "token=<redacted>" in controller.events[-1]["error"]
+
+
 def test_recognizes_instrumentation_result() -> None:
     assert instrumentation_succeeded(
         CommandResult(0, 1.0, ("OK (1 test)", "INSTRUMENTATION_CODE: -1"))
@@ -256,10 +454,15 @@ def test_recognizes_instrumentation_result() -> None:
 
 
 def test_supervised_command_times_out_even_without_output(tmp_path: Path) -> None:
-    with pytest.raises(CaptureError, match="timed out"):
+    serial = "device-serial-9876"
+    with pytest.raises(CaptureError, match="timed out") as error:
         run_supervised(
-            [sys.executable, "-c", "import time; time.sleep(5)"],
+            [sys.executable, "-c", "import time; time.sleep(5)", serial],
             cwd=tmp_path,
             timeout_seconds=1,
             log_path=tmp_path / "command.log",
+            serial=serial,
         )
+
+    assert serial not in str(error.value)
+    assert "…9876" in str(error.value)

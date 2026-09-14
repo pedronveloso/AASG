@@ -69,7 +69,8 @@ captures, locales, themes, and navigation modes in subdued text so the default c
 
 The app remains responsible for in-app navigation, fixtures, permissions, UI synchronization,
 locale and theme application, and deciding when to capture. AASG can manage the Android system's
-gesture or three-button navigation mode around a capture. The test writes output through
+gesture or three-button navigation mode and Show taps setting around a capture. The test writes
+output through
 `PlatformTestStorageRegistry`:
 
 ```kotlin
@@ -106,12 +107,13 @@ redact a named region without duplicating UI coordinates on the host.
 schema versions, and invalid pipeline combinations fail before a test starts. All relative paths
 resolve from the configuration file.
 
-AASG 0.3 uses configuration schema 3. To migrate a schema 2 configuration, change its top-level
-`schema` value to `3`. Captures default to `navigation: ignore`, preserving existing behavior.
-Choose `gestural`, `three-button`, or `all` when AASG should manage system navigation.
+AASG 0.4 uses configuration schema 4. To migrate a schema 3 configuration, change its top-level
+`schema` value to `4`. Video captures default to `show_taps: true`; set it to `false` when touch
+feedback should be hidden. A video capture may also declare JSON artifacts, but it cannot mix video
+and image artifacts. Split mixed visual output into separate captures before migrating.
 
 ```yaml
-schema: 3
+schema: 4
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -154,6 +156,16 @@ captures:
         renditions:
           - publish: screenshots/framed/{locale}/home-{theme}-{navigation}.png
             pipeline: pixel-8
+  walkthrough:
+    label: Onboarding walkthrough
+    test: com.example.OnboardingVideoCaptureTest
+    show_taps: true
+    arguments: {recording: onboarding}
+    artifacts:
+      - id: walkthrough
+        type: video
+        source: recordings/{locale}/onboarding-{theme}.mp4
+        publish: videos/raw/{locale}/onboarding-{theme}.mp4
 
 pipelines:
   pixel-8:
@@ -174,7 +186,12 @@ Artifact `source` is an exact suffix inside the AGP additional-output tree. `pub
 paths stay under `project.artifact_root`. Captures accept `navigation: gestural`, `three-button`,
 `all`, or `ignore` (the default). Only `all` captures use the repeatable `--navigation` selection;
 their publication paths must contain `{navigation}` so modes cannot overwrite each other. AASG
-restores the device's original mode after the run. Available typed operations are `resize`, `crop`, `pad`,
+restores the device's original mode after the run. Captures containing a video artifact accept
+`show_taps: true` or `false`; the default is `true`. AASG applies the active Android user's setting
+only during the recording capture and restores the original value before publishing artifacts,
+including after failures and interruptions. Video captures may include JSON artifacts but not image
+artifacts. Show taps is entirely YAML-controlled and is never an interactive capture choice.
+Available typed operations are `resize`, `crop`, `pad`,
 `background`, `blur`, `redact`, `device_frame`, `edge_fade`, `feather`, `trim`, and
 `temporal_fade`. A `device_frame` step can set `crop_to_frame: true` to remove fully transparent
 canvas margins while preserving every non-zero alpha pixel in the frame artwork. It defaults to
@@ -192,9 +209,10 @@ Pass `--theme` when a pipeline uses a theme-keyed background color.
 
 A variant is first collected and rendered in its run staging directory. AASG validates the media,
 hashes it, and only then atomically updates stable output paths. A failed variant leaves earlier
-valid outputs intact. Run-manifest schema 2 records configuration, selected device model/API,
-navigation switches and restoration, timings, checksums, renderer commands, and frame provenance;
-device serials and common credential patterns are redacted.
+valid outputs intact. Run-manifest schema 3 records configuration, selected device model/API,
+navigation and Show taps changes and restoration, timings, checksums, renderer commands, and frame
+provenance; device serials and common credential patterns are redacted from commands, logs, and
+persisted error details.
 
 ## Device frames and licensing
 

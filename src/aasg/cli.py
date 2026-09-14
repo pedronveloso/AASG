@@ -454,6 +454,15 @@ def capture(
                 "[red]Device navigation restoration failed.[/red] "
                 f"{restoration.get('manual_command', '')}"
             )
+        show_taps_restoration = outcome.manifest.get("show_taps", {}).get("restoration", {})
+        if (
+            isinstance(show_taps_restoration, dict)
+            and show_taps_restoration.get("status") == "failed"
+        ):
+            console.print(
+                "[red]Android Show taps restoration failed.[/red] "
+                f"{show_taps_restoration.get('manual_command', '')}"
+            )
         if outcome.exit_code:
             raise typer.Exit(outcome.exit_code)
     except typer.Exit:
