@@ -94,6 +94,48 @@ def test_all_navigation_requires_distinct_publication_paths(tmp_path: Path) -> N
         load_config(path)
 
 
+@pytest.mark.parametrize("field", ["publish", "rendition"])
+def test_all_navigation_rejects_escaped_navigation_literal(tmp_path: Path, field: str) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["navigation"] = "all"
+    artifact = capture["artifacts"][0]
+    artifact["publish"] = "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
+    if field == "publish":
+        artifact["publish"] = "screenshots/raw/{locale}/home-{{navigation}}.png"
+    else:
+        data["pipelines"] = {"copy": {"steps": []}}
+        artifact["renditions"] = [
+            {
+                "publish": "screenshots/framed/{locale}/home-{{navigation}}.png",
+                "pipeline": "copy",
+            }
+        ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match=r"must contain \{navigation\}"):
+        load_config(path)
+
+
+def test_all_navigation_accepts_literal_braces_with_navigation_field(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["navigation"] = "all"
+    template = "screenshots/raw/{locale}/home-{{literal}}-{navigation}.png"
+    data["captures"]["home"]["artifacts"][0]["publish"] = template
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    load_config(path)
+
+    assert render_template(template, locale="en", navigation="gestural") == (
+        "screenshots/raw/en/home-{literal}-gestural.png"
+    )
+    assert render_template(template, locale="en", navigation="three-button") == (
+        "screenshots/raw/en/home-{literal}-three-button.png"
+    )
+
+
 @pytest.mark.parametrize("schema", [1, 2, 3, 5])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int

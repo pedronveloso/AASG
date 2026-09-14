@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import string
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
@@ -232,6 +233,10 @@ FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminato
 CONFIG_SCHEMA_VERSION = 4
 
 
+def _has_template_field(template: str, field: str) -> bool:
+    return any(field_name == field for _, field_name, _, _ in string.Formatter().parse(template))
+
+
 class AasgConfig(StrictModel):
     schema_version: Literal[4] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
@@ -275,10 +280,12 @@ class AasgConfig(StrictModel):
                 if capture.navigation == "all":
                     navigation_paths = [artifact.publish]
                     navigation_paths.extend(rendition.publish for rendition in artifact.renditions)
-                    if any("{navigation}" not in path for path in navigation_paths):
+                    if any(
+                        not _has_template_field(path, "navigation") for path in navigation_paths
+                    ):
                         raise ValueError(
                             f"capture {capture_id!r} uses navigation 'all', so every publication "
-                            "path must contain {navigation}"
+                            "path must contain {navigation} as a formatter field"
                         )
                 for rendition in artifact.renditions:
                     if rendition.pipeline not in self.pipelines:

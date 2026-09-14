@@ -185,7 +185,8 @@ frame_sources:
 Artifact `source` is an exact suffix inside the AGP additional-output tree. `publish` and rendition
 paths stay under `project.artifact_root`. Captures accept `navigation: gestural`, `three-button`,
 `all`, or `ignore` (the default). Only `all` captures use the repeatable `--navigation` selection;
-their publication paths must contain `{navigation}` so modes cannot overwrite each other. AASG
+their publication paths must contain an actual `{navigation}` formatter field so modes cannot
+overwrite each other. AASG
 restores the device's original mode after the run. Captures containing a video artifact accept
 `show_taps: true` or `false`; the default is `true`. AASG applies the active Android user's setting
 only during the recording capture and restores the original value before publishing artifacts,
