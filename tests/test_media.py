@@ -442,6 +442,70 @@ def test_device_frame_crops_transparent_margins_and_records_bounds(tmp_path: Pat
     assert len(processor._frame_bounds) == 1
 
 
+def test_crop_to_frame_revalidates_changed_screen_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    screen = {"x": 20, "y": 30, "width": 80, "height": 180}
+    make_local_frame(
+        tmp_path,
+        frame_source=(
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=10:y=20:w=100:h=200:color=blue@1.0:t=5:replace=1"
+        ),
+        screen=screen,
+    )
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+    processor = MediaProcessor()
+
+    processor.process(
+        source,
+        tmp_path / "valid.png",
+        config.pipelines["frame"],
+        config=config,
+        config_path=path,
+    )
+    template_path = tmp_path / "frames" / "android-phone" / "generic" / "black" / "template.json"
+    template = json.loads(template_path.read_text())
+    template["screen"]["x"] = 0
+    template_path.write_text(json.dumps(template))
+
+    with pytest.raises(ProcessingError, match="do not contain"):
+        processor.process(
+            source,
+            tmp_path / "invalid.png",
+            config.pipelines["frame"],
+            config=config,
+            config_path=path,
+        )
+
+
+def test_crop_to_frame_rejects_swapped_frame_size_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    make_local_frame(
+        tmp_path,
+        frame_source=(
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=10:y=20:w=100:h=200:color=blue@1.0:t=5:replace=1"
+        ),
+        screen={"x": 20, "y": 30, "width": 80, "height": 180},
+    )
+    template_path = tmp_path / "frames" / "android-phone" / "generic" / "black" / "template.json"
+    template = json.loads(template_path.read_text())
+    template["frameSize"] = {"width": 240, "height": 120}
+    template_path.write_text(json.dumps(template))
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+
+    with pytest.raises(ProcessingError, match="Frame dimensions do not match"):
+        MediaProcessor().process(
+            source,
+            tmp_path / "invalid.png",
+            config.pipelines["frame"],
+            config=config,
+            config_path=path,
+        )
+
+
 def test_cropped_device_frame_video_is_padded_to_even_dimensions(tmp_path: Path) -> None:
     source = tmp_path / "source.mp4"
     subprocess.run(

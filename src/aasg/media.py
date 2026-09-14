@@ -83,7 +83,7 @@ class MediaProcessor:
     def __init__(self, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe") -> None:
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
-        self._frame_bounds: dict[tuple[Path, int, int], Region] = {}
+        self._frame_bounds: dict[tuple[Path, int, int, int, int, int, int, int, int], Region] = {}
 
     def process(
         self,
@@ -484,14 +484,28 @@ class MediaProcessor:
 
     def _frame_crop(self, asset: FrameAsset) -> Region:
         frame_size = asset.metadata.frame_size
+        screen = asset.metadata.screen
         frame_path = asset.frame_path.resolve()
         stat = frame_path.stat()
-        key = (frame_path, stat.st_size, stat.st_mtime_ns)
+        width = frame_size["width"]
+        height = frame_size["height"]
+        key = (
+            frame_path,
+            stat.st_size,
+            stat.st_mtime_ns,
+            width,
+            height,
+            screen.x,
+            screen.y,
+            screen.width,
+            screen.height,
+        )
         cached = self._frame_bounds.get(key)
         if cached is not None:
             return cached
-        width = frame_size["width"]
-        height = frame_size["height"]
+        dimensions = probe(frame_path, self.ffprobe)
+        if (dimensions.width, dimensions.height) != (width, height):
+            raise ProcessingError(f"Frame dimensions do not match frameSize metadata: {frame_path}")
         command = [
             self.ffmpeg,
             "-hide_banner",
@@ -540,7 +554,6 @@ class MediaProcessor:
             width=max_x - min_x + 1,
             height=max_y - min_y + 1,
         )
-        screen = asset.metadata.screen
         if (
             screen.x < crop.x
             or screen.y < crop.y

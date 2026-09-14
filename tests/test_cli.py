@@ -34,10 +34,19 @@ def test_version_option() -> None:
 
 
 def test_package_versions_are_synchronized() -> None:
-    pyproject = Path(__file__).parents[1] / "pyproject.toml"
+    root = Path(__file__).parents[1]
+    pyproject = root / "pyproject.toml"
     project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    packages = [
+        package
+        for package in lock["package"]
+        if package["name"] == "android-auto-screengrabs"
+        and package.get("source") == {"editable": "."}
+    ]
 
-    assert project["version"] == __version__
+    assert len(packages) == 1
+    assert project["version"] == packages[0]["version"] == __version__
 
 
 def test_config_validate(tmp_path: Path) -> None:

@@ -228,7 +228,8 @@ Apache-2.0 license, and users are responsible for determining whether their use 
 Project-local frame packs are also supported and must declare their license.
 Their `template.json` uses the same `frame`, `mask`, `screen`, and `frameSize` geometry fields as the
 remote catalog, plus mandatory `sha256.frame` and `sha256.mask` values. AASG verifies both files
-before use.
+before use, validates that `frameSize` matches the decoded frame artwork, and validates crop bounds
+against the configured screen rectangle.
 
 Cached indexes are not silently refreshed:
 
