@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      commit-message-tooling:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      workflow-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

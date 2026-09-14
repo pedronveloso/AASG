@@ -11,6 +11,7 @@ from conftest import write_config
 from aasg.config import load_config
 from aasg.errors import ProcessingError
 from aasg.media import MediaProcessor, probe
+from aasg.models import AasgConfig
 
 
 def make_image(path: Path, *, size: str = "100x100", color: str = "red") -> None:
@@ -52,6 +53,93 @@ def rgba_pixels(path: Path) -> bytes:
         check=True,
         capture_output=True,
     ).stdout
+
+
+def make_local_frame(
+    root: Path,
+    *,
+    frame_source: str,
+    screen: dict[str, int],
+    frame_size: tuple[int, int] = (120, 240),
+) -> None:
+    frame_root = root / "frames" / "android-phone" / "generic" / "black"
+    frame_root.mkdir(parents=True)
+    frame_path = frame_root / "frame.png"
+    mask_path = frame_root / "mask.png"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            frame_source,
+            "-frames:v",
+            "1",
+            str(frame_path),
+        ],
+        check=True,
+    )
+    width, height = frame_size
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=black:s={width}x{height},format=gray,"
+            f"drawbox=x={screen['x']}:y={screen['y']}:w={screen['width']}:"
+            f"h={screen['height']}:color=white:t=fill",
+            "-frames:v",
+            "1",
+            str(mask_path),
+        ],
+        check=True,
+    )
+    (frame_root / "template.json").write_text(
+        json.dumps(
+            {
+                "frame": "frame.png",
+                "mask": "mask.png",
+                "screen": screen,
+                "frameSize": {"width": width, "height": height},
+                "sha256": {
+                    "frame": hashlib.sha256(frame_path.read_bytes()).hexdigest(),
+                    "mask": hashlib.sha256(mask_path.read_bytes()).hexdigest(),
+                },
+            }
+        )
+    )
+
+
+def frame_pipeline_config(
+    root: Path,
+    *,
+    crop_to_frame: bool,
+    background: str | dict[str, str] | None = None,
+) -> tuple[Path, AasgConfig]:
+    step: dict[str, object] = {
+        "type": "device_frame",
+        "source": "local",
+        "frame": "android-phone/generic/black",
+        "fit": "contain",
+        "crop_to_frame": crop_to_frame,
+    }
+    if background is not None:
+        step["background"] = background
+    path = write_config(
+        root,
+        {
+            "frame_sources": {"local": {"kind": "local", "root": "frames", "license": "CC0-1.0"}},
+            "pipelines": {"frame": {"steps": [step]}},
+        },
+    )
+    return path, load_config(path)
 
 
 def test_semantic_crop_and_feather(tmp_path: Path) -> None:
@@ -262,9 +350,11 @@ def test_framed_trimmed_video(tmp_path: Path) -> None:
         },
     )
     config = load_config(path)
+    assert config.pipelines["clip"].steps[-1].model_dump()["crop_to_frame"] is False
     output = tmp_path / "clip.mp4"
 
-    result = MediaProcessor().process(
+    processor = MediaProcessor()
+    result = processor.process(
         source,
         output,
         config.pipelines["clip"],
@@ -297,6 +387,238 @@ def test_framed_trimmed_video(tmp_path: Path) -> None:
     assert info.duration == pytest.approx(1.0, abs=0.1)
     assert stream == {"codec_name": "h264", "pix_fmt": "yuv420p", "r_frame_rate": "30/1"}
     assert result.frames[0]["license"] == "CC0-1.0"
+
+
+def test_device_frame_crops_transparent_margins_and_records_bounds(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    screen = {"x": 20, "y": 30, "width": 80, "height": 180}
+    make_local_frame(
+        tmp_path,
+        frame_source=(
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=10:y=20:w=100:h=200:color=blue@1.0:t=5:replace=1"
+        ),
+        screen=screen,
+    )
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+    output = tmp_path / "cropped.png"
+
+    processor = MediaProcessor()
+    result = processor.process(
+        source,
+        output,
+        config.pipelines["frame"],
+        config=config,
+        config_path=path,
+    )
+
+    info = probe(output)
+    assert (info.width, info.height) == (100, 200)
+    assert result.frames[0]["crop"] == {
+        "mode": "alpha_bounds",
+        "x": 10,
+        "y": 20,
+        "width": 100,
+        "height": 200,
+    }
+    assert "crop=100:200:10:20" in result.commands[-1]
+    pixels = rgba_pixels(output)
+    assert any(pixels[index] for index in range(3, info.width * 4, 4))
+    bottom_alpha = (info.height - 1) * info.width * 4 + 3
+    assert any(pixels[index] for index in range(bottom_alpha, len(pixels), 4))
+    assert any(pixels[row * info.width * 4 + 3] for row in range(info.height))
+    assert any(pixels[(row * info.width + info.width - 1) * 4 + 3] for row in range(info.height))
+    dry_run = processor.process(
+        source,
+        tmp_path / "planned.png",
+        config.pipelines["frame"],
+        config=config,
+        config_path=path,
+        dry_run=True,
+    )
+    assert "crop=100:200:10:20" in dry_run.commands[-1]
+    assert dry_run.frames[0]["crop"] == result.frames[0]["crop"]
+    assert len(processor._frame_bounds) == 1
+
+
+def test_crop_to_frame_revalidates_changed_screen_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    screen = {"x": 20, "y": 30, "width": 80, "height": 180}
+    make_local_frame(
+        tmp_path,
+        frame_source=(
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=10:y=20:w=100:h=200:color=blue@1.0:t=5:replace=1"
+        ),
+        screen=screen,
+    )
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+    processor = MediaProcessor()
+
+    processor.process(
+        source,
+        tmp_path / "valid.png",
+        config.pipelines["frame"],
+        config=config,
+        config_path=path,
+    )
+    template_path = tmp_path / "frames" / "android-phone" / "generic" / "black" / "template.json"
+    template = json.loads(template_path.read_text())
+    template["screen"]["x"] = 0
+    template_path.write_text(json.dumps(template))
+
+    with pytest.raises(ProcessingError, match="do not contain"):
+        processor.process(
+            source,
+            tmp_path / "invalid.png",
+            config.pipelines["frame"],
+            config=config,
+            config_path=path,
+        )
+
+
+def test_crop_to_frame_rejects_swapped_frame_size_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    make_local_frame(
+        tmp_path,
+        frame_source=(
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=10:y=20:w=100:h=200:color=blue@1.0:t=5:replace=1"
+        ),
+        screen={"x": 20, "y": 30, "width": 80, "height": 180},
+    )
+    template_path = tmp_path / "frames" / "android-phone" / "generic" / "black" / "template.json"
+    template = json.loads(template_path.read_text())
+    template["frameSize"] = {"width": 240, "height": 120}
+    template_path.write_text(json.dumps(template))
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+
+    with pytest.raises(ProcessingError, match="Frame dimensions do not match"):
+        MediaProcessor().process(
+            source,
+            tmp_path / "invalid.png",
+            config.pipelines["frame"],
+            config=config,
+            config_path=path,
+        )
+
+
+def test_cropped_device_frame_video_is_padded_to_even_dimensions(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=50x100:rate=10:duration=0.2",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        check=True,
+    )
+    screen = {"x": 20, "y": 30, "width": 80, "height": 180}
+    make_local_frame(
+        tmp_path,
+        frame_source=(
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=10:y=20:w=101:h=201:color=blue@1.0:t=5:replace=1"
+        ),
+        screen=screen,
+    )
+    path, config = frame_pipeline_config(
+        tmp_path,
+        crop_to_frame=True,
+        background={"light": "white", "dark": "black"},
+    )
+    output = tmp_path / "cropped.mp4"
+
+    result = MediaProcessor().process(
+        source,
+        output,
+        config.pipelines["frame"],
+        config=config,
+        config_path=path,
+        variables={"theme": "light"},
+    )
+
+    info = probe(output)
+    assert (info.width, info.height) == (102, 202)
+    assert result.frames[0]["crop"]["width"] == 101
+    assert result.frames[0]["crop"]["height"] == 201
+
+
+def test_crop_to_frame_treats_opaque_frame_as_already_tight(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    screen = {"x": 10, "y": 20, "width": 100, "height": 200}
+    make_local_frame(
+        tmp_path,
+        frame_source="color=blue:s=120x240,format=rgba",
+        screen=screen,
+    )
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+    output = tmp_path / "opaque.png"
+
+    result = MediaProcessor().process(
+        source,
+        output,
+        config.pipelines["frame"],
+        config=config,
+        config_path=path,
+    )
+
+    info = probe(output)
+    assert (info.width, info.height) == (120, 240)
+    assert result.frames[0]["crop"]["width"] == 120
+    assert "crop=" not in result.commands[-1]
+
+
+@pytest.mark.parametrize(
+    ("frame_source", "screen", "message"),
+    [
+        (
+            "color=black@0.0:s=120x240,format=rgba",
+            {"x": 10, "y": 20, "width": 100, "height": 200},
+            "fully transparent",
+        ),
+        (
+            "color=black@0.0:s=120x240,format=rgba,"
+            "drawbox=x=20:y=30:w=80:h=180:color=blue@1.0:t=5:replace=1",
+            {"x": 10, "y": 20, "width": 100, "height": 200},
+            "do not contain",
+        ),
+    ],
+)
+def test_crop_to_frame_rejects_invalid_frame_alpha(
+    tmp_path: Path,
+    frame_source: str,
+    screen: dict[str, int],
+    message: str,
+) -> None:
+    source = tmp_path / "source.png"
+    make_image(source, size="50x100")
+    make_local_frame(tmp_path, frame_source=frame_source, screen=screen)
+    path, config = frame_pipeline_config(tmp_path, crop_to_frame=True)
+
+    with pytest.raises(ProcessingError, match=message):
+        MediaProcessor().process(
+            source,
+            tmp_path / "invalid.png",
+            config.pipelines["frame"],
+            config=config,
+            config_path=path,
+        )
 
 
 def test_video_encoder_pads_odd_dimensions_with_pipeline_background(tmp_path: Path) -> None:
@@ -347,4 +669,5 @@ def test_video_encoder_pads_odd_dimensions_with_pipeline_background(tmp_path: Pa
 
     info = probe(output)
     assert (info.width, info.height) == (102, 202)
+    assert "color=c=white:s=101x201,format=bgra" in result.commands[-2]
     assert "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=white" in result.commands[-1]

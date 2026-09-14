@@ -49,12 +49,12 @@ aasg doctor
 aasg capture
 ```
 
-Interactive capture remembers the last successful device, captures, locales, and themes outside the
-project directory. For automation, make every choice explicit:
+Interactive capture remembers the last successful device, captures, locales, themes, and navigation
+modes outside the project directory. For automation, make every choice explicit:
 
 ```shell
-aasg capture home --device emulator-5554 --locale en --theme light --non-interactive
-aasg capture --all --locale all --theme all --device emulator-5554 --non-interactive
+aasg capture home --device emulator-5554 --locale en --theme light --navigation gestural --non-interactive
+aasg capture --all --locale all --theme all --navigation all --device emulator-5554 --non-interactive
 ```
 
 Use `--dry-run` to resolve the capture matrix and commands without invoking Android tooling. Every
@@ -63,12 +63,14 @@ prints each generated raw asset and rendition as a path relative to the configur
 `--json` includes the same ordered paths in its `assets` array.
 
 When an interactive run offers to reuse the previous selection, it first shows the saved device,
-captures, locales, and themes in subdued text so the default choice is explicit.
+captures, locales, themes, and navigation modes in subdued text so the default choice is explicit.
 
 ## Android test contract
 
-The app remains responsible for navigation, fixtures, permissions, UI synchronization, locale and
-theme application, and deciding when to capture. It writes output through
+The app remains responsible for in-app navigation, fixtures, permissions, UI synchronization,
+locale and theme application, and deciding when to capture. AASG can manage the Android system's
+gesture or three-button navigation mode and Show taps setting around a capture. The test writes
+output through
 `PlatformTestStorageRegistry`:
 
 ```kotlin
@@ -77,12 +79,12 @@ PlatformTestStorageRegistry.getInstance()
   .use { output -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, output) }
 ```
 
-AASG runs one capture/locale/theme combination per instrumentation invocation and immediately
-copies the fresh AndroidX Test Storage output. The default path delegates execution and collection
-to Gradle. Projects affected by an Android/AGP user-selection incompatibility can opt into direct
-instrumentation: Gradle still builds both APKs, while AASG resolves the active numeric Android user,
-installs the APKs, launches `am instrument --user <id>`, and pulls only the declared Test Storage
-directory. AASG never reads app-private files.
+AASG runs one capture/locale/theme/navigation combination per instrumentation invocation and
+immediately copies the fresh AndroidX Test Storage output. The default path delegates execution and
+collection to Gradle. Projects affected by an Android/AGP user-selection incompatibility can opt
+into direct instrumentation: Gradle still builds both APKs, while AASG resolves the active numeric
+Android user, installs the APKs, launches `am instrument --user <id>`, and pulls only the declared
+Test Storage directory. AASG never reads app-private files.
 
 Tests can attach named UI regions to captured media:
 
@@ -101,12 +103,17 @@ redact a named region without duplicating UI coordinates on the host.
 
 ## Configuration
 
-`aasg.yaml` is strict and versioned. Unknown fields, missing references, unsafe paths, and invalid
-pipeline combinations fail before a test starts. All relative paths resolve from the configuration
-file.
+`aasg.yaml` is strict and versioned. Unknown fields, missing references, unsafe paths, incompatible
+schema versions, and invalid pipeline combinations fail before a test starts. All relative paths
+resolve from the configuration file.
+
+AASG 0.4 uses configuration schema 4. To migrate a schema 3 configuration, change its top-level
+`schema` value to `4`. Video captures default to `show_taps: true`; set it to `false` when touch
+feedback should be hidden. A video capture may also declare JSON artifacts, but it cannot mix video
+and image artifacts. Split mixed visual output into separate captures before migrating.
 
 ```yaml
-schema: 1
+schema: 4
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -139,15 +146,26 @@ captures:
   home:
     label: Home screenshot
     test: com.example.HomeScreenshotCaptureTest
+    navigation: all
     arguments: {screenshot: home, notAnnotation: ""}
     artifacts:
       - id: home
         type: image
         source: screenshots/{locale}/home-{theme}.png
-        publish: screenshots/raw/{locale}/home-{theme}.png
+        publish: screenshots/raw/{locale}/home-{theme}-{navigation}.png
         renditions:
-          - publish: screenshots/framed/{locale}/home-{theme}.png
+          - publish: screenshots/framed/{locale}/home-{theme}-{navigation}.png
             pipeline: pixel-8
+  walkthrough:
+    label: Onboarding walkthrough
+    test: com.example.OnboardingVideoCaptureTest
+    show_taps: true
+    arguments: {recording: onboarding}
+    artifacts:
+      - id: walkthrough
+        type: video
+        source: recordings/{locale}/onboarding-{theme}.mp4
+        publish: videos/raw/{locale}/onboarding-{theme}.mp4
 
 pipelines:
   pixel-8:
@@ -156,6 +174,7 @@ pipelines:
         source: community
         frame: android-phone/pixel-8/hazel
         fit: cover
+        crop_to_frame: true
 
 frame_sources:
   community:
@@ -164,9 +183,20 @@ frame_sources:
 ```
 
 Artifact `source` is an exact suffix inside the AGP additional-output tree. `publish` and rendition
-paths stay under `project.artifact_root`. Available typed operations are `resize`, `crop`, `pad`,
+paths stay under `project.artifact_root`. Captures accept `navigation: gestural`, `three-button`,
+`all`, or `ignore` (the default). Only `all` captures use the repeatable `--navigation` selection;
+their publication paths must contain an actual `{navigation}` formatter field so modes cannot
+overwrite each other. AASG
+restores the device's original mode after the run. Captures containing a video artifact accept
+`show_taps: true` or `false`; the default is `true`. AASG applies the active Android user's setting
+only during the recording capture and restores the original value before publishing artifacts,
+including after failures and interruptions. Video captures may include JSON artifacts but not image
+artifacts. Show taps is entirely YAML-controlled and is never an interactive capture choice.
+Available typed operations are `resize`, `crop`, `pad`,
 `background`, `blur`, `redact`, `device_frame`, `edge_fade`, `feather`, `trim`, and
-`temporal_fade`.
+`temporal_fade`. A `device_frame` step can set `crop_to_frame: true` to remove fully transparent
+canvas margins while preserving every non-zero alpha pixel in the frame artwork. It defaults to
+`false`.
 
 Process an existing file through any named pipeline:
 
@@ -180,9 +210,10 @@ Pass `--theme` when a pipeline uses a theme-keyed background color.
 
 A variant is first collected and rendered in its run staging directory. AASG validates the media,
 hashes it, and only then atomically updates stable output paths. A failed variant leaves earlier
-valid outputs intact. The run manifest records configuration, selected device model/API, timings,
-checksums, renderer commands, and frame provenance; device serials and common credential patterns
-are redacted.
+valid outputs intact. Run-manifest schema 3 records configuration, selected device model/API,
+navigation and Show taps changes and restoration, timings, checksums, renderer commands, and frame
+provenance; device serials and common credential patterns are redacted from commands, logs, and
+persisted error details.
 
 ## Device frames and licensing
 
@@ -197,7 +228,8 @@ Apache-2.0 license, and users are responsible for determining whether their use 
 Project-local frame packs are also supported and must declare their license.
 Their `template.json` uses the same `frame`, `mask`, `screen`, and `frameSize` geometry fields as the
 remote catalog, plus mandatory `sha256.frame` and `sha256.mask` values. AASG verifies both files
-before use.
+before use, validates that `frameSize` matches the decoded frame artwork, and validates crop bounds
+against the configured screen rectangle.
 
 Cached indexes are not silently refreshed:
 
@@ -233,11 +265,15 @@ See [AGENTS.md](AGENTS.md) for repository conventions.
 
 ## Versioning
 
-AASG follows [Semantic Versioning 2.0.0](https://semver.org/). Until version 1.0.0, incompatible
-changes may be released in a new minor version. Patch releases remain reserved for
-backwards-compatible fixes. The `feat`, `fix`, and breaking-change markers in Conventional Commit
-messages record the intended release impact; before 1.0.0, breaking markers follow the minor-version
-policy above.
+AASG follows [Semantic Versioning 2.0.0](https://semver.org/). Every completed feature increments
+the application version; feature releases increment the minor version and backwards-compatible
+fixes increment the patch version. Until version 1.0.0, incompatible changes also increment the
+minor version.
+
+The YAML schema has its own integer version. Adding, removing, renaming, or changing the meaning of
+any YAML definition increments that schema version in the model, starter configuration,
+documentation, tests, and pilot project configurations. This gives older AASG releases an explicit
+migration signal instead of leaving them to report an unknown-field error.
 
 ## Author
 

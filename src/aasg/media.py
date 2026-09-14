@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from aasg.errors import PrerequisiteError, ProcessingError
-from aasg.frames import resolve_frame
+from aasg.frames import FrameAsset, resolve_frame
 from aasg.models import (
     AasgConfig,
     BackgroundStep,
@@ -83,6 +83,7 @@ class MediaProcessor:
     def __init__(self, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe") -> None:
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
+        self._frame_bounds: dict[tuple[Path, int, int, int, int, int, int, int, int], Region] = {}
 
     def process(
         self,
@@ -292,12 +293,27 @@ class MediaProcessor:
                 if step.background is not None
                 else None
             )
-            command = self._device_frame(source, output, step, info, asset, background)
+            crop = self._frame_crop(asset) if step.crop_to_frame else None
+            command = self._device_frame(source, output, step, info, asset, background, crop)
             size = asset.metadata.frame_size
+            provenance = dict(asset.provenance)
+            if crop is not None:
+                provenance["crop"] = {
+                    "mode": "alpha_bounds",
+                    "x": crop.x,
+                    "y": crop.y,
+                    "width": crop.width,
+                    "height": crop.height,
+                }
             return (
                 command,
-                MediaInfo(info.kind, size["width"], size["height"], info.duration),
-                asset.provenance,
+                MediaInfo(
+                    info.kind,
+                    crop.width if crop is not None else size["width"],
+                    crop.height if crop is not None else size["height"],
+                    info.duration,
+                ),
+                provenance,
             )
         raise ProcessingError(f"Unsupported pipeline step: {step!r}")
 
@@ -325,7 +341,7 @@ class MediaProcessor:
             "-f",
             "lavfi",
             "-i",
-            f"color=c={color}:s={info.width}x{info.height}",
+            f"color=c={color}:s={info.width}x{info.height},format=bgra",
             "-i",
             str(source),
             "-filter_complex",
@@ -403,8 +419,9 @@ class MediaProcessor:
         output: Path,
         step: DeviceFrameStep,
         info: MediaInfo,
-        asset: Any,
+        asset: FrameAsset,
         background: str | None,
+        crop: Region | None,
     ) -> list[str]:
         screen = asset.metadata.screen
         frame_size = asset.metadata.frame_size
@@ -437,6 +454,16 @@ class MediaProcessor:
                 ]
             )
             final_label = "final"
+        if crop is not None and (
+            crop.x != 0
+            or crop.y != 0
+            or crop.width != frame_size["width"]
+            or crop.height != frame_size["height"]
+        ):
+            filter_parts.append(
+                f"[{final_label}]crop={crop.width}:{crop.height}:{crop.x}:{crop.y}[cropped]"
+            )
+            final_label = "cropped"
         command = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source)]
         if info.kind == "video":
             command.extend(["-loop", "1"])
@@ -454,6 +481,90 @@ class MediaProcessor:
             ]
         )
         return self._output_options(command, output, info)
+
+    def _frame_crop(self, asset: FrameAsset) -> Region:
+        frame_size = asset.metadata.frame_size
+        screen = asset.metadata.screen
+        frame_path = asset.frame_path.resolve()
+        stat = frame_path.stat()
+        width = frame_size["width"]
+        height = frame_size["height"]
+        key = (
+            frame_path,
+            stat.st_size,
+            stat.st_mtime_ns,
+            width,
+            height,
+            screen.x,
+            screen.y,
+            screen.width,
+            screen.height,
+        )
+        cached = self._frame_bounds.get(key)
+        if cached is not None:
+            return cached
+        dimensions = probe(frame_path, self.ffprobe)
+        if (dimensions.width, dimensions.height) != (width, height):
+            raise ProcessingError(f"Frame dimensions do not match frameSize metadata: {frame_path}")
+        command = [
+            self.ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(frame_path),
+            "-vf",
+            "format=rgba,alphaextract",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "pipe:1",
+        ]
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, timeout=30)
+        except FileNotFoundError as error:
+            raise PrerequisiteError(f"Executable not found: {self.ffmpeg}") from error
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            raise ProcessingError(f"Could not inspect frame alpha: {frame_path}") from error
+        alpha = result.stdout
+        expected_size = width * height
+        if len(alpha) != expected_size:
+            raise ProcessingError(f"Frame dimensions do not match frameSize metadata: {frame_path}")
+        min_x = width
+        min_y = height
+        max_x = -1
+        max_y = -1
+        for index, value in enumerate(alpha):
+            if value == 0:
+                continue
+            x = index % width
+            y = index // width
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+            max_y = max(max_y, y)
+        if max_x < 0 or max_y < 0:
+            raise ProcessingError(f"Cannot crop a fully transparent device frame: {frame_path}")
+        crop = Region(
+            x=min_x,
+            y=min_y,
+            width=max_x - min_x + 1,
+            height=max_y - min_y + 1,
+        )
+        if (
+            screen.x < crop.x
+            or screen.y < crop.y
+            or screen.x + screen.width > crop.x + crop.width
+            or screen.y + screen.height > crop.y + crop.height
+        ):
+            raise ProcessingError(
+                f"Frame alpha bounds do not contain the configured screen rectangle: {frame_path}"
+            )
+        self._frame_bounds[key] = crop
+        return crop
 
     @staticmethod
     def _variant_value(

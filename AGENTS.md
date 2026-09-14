@@ -38,14 +38,18 @@ upload, or bundled FFmpeg/device artwork without an explicit product decision.
 
 - Follow Semantic Versioning 2.0.0 for releases. Before 1.0.0, incompatible public-interface
   changes increment the minor version; backwards-compatible fixes increment the patch version.
+- Bump the application version whenever a feature is completed. Features increment the minor
+  version; fixes increment the patch version unless they are incompatible before 1.0.0.
 - Treat configuration schemas, semantic metadata, run manifests, CLI behavior, and documented
   Python interfaces as the public API when deciding version impact.
+- Increment the top-level `aasg.yaml` schema version whenever a YAML definition is added, removed,
+  renamed, or changes meaning. Update the model, starter configuration, documentation, tests, and
+  maintained pilot configurations together, and document the migration from the previous schema.
 - Use Conventional Commit messages that pass commitlint. Prefer the types `feat`, `fix`, `docs`,
   `refactor`, `test`, `build`, `ci`, `chore`, `perf`, and `revert`.
 - Mark incompatible changes with `!` in the type/scope or a `BREAKING CHANGE:` footer, and explain
   the affected public interface in the commit body or footer.
-- Keep the versions in `pyproject.toml` and `src/aasg/__init__.py` synchronized when preparing a
-  release.
+- Keep the versions in `pyproject.toml`, `src/aasg/__init__.py`, and `uv.lock` synchronized.
 
 ## Commands
 
@@ -67,7 +71,12 @@ file bytes.
 ## Definition of done
 
 - Public behavior is documented in `README.md`.
-- Schema changes include validation and compatibility tests.
+- Every completed feature or fix includes the appropriate application-version bump.
+- YAML contract changes include a schema-version bump, migration documentation, validation and
+  compatibility tests, and updates to maintained pilot configurations.
 - New FFmpeg operations include dry-run output and media-property tests.
 - Capture failures preserve successful outputs and leave a useful run manifest/log.
+- Before completing a task, run the local equivalents of every CI verification, including
+  `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy`, `uv run pytest`, and
+  `uv build`.
 - Ruff formatting/lint, mypy, pytest, and package build pass.
