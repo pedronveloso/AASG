@@ -12,7 +12,7 @@ from aasg import __version__
 from aasg.errors import ConfigurationError
 from aasg.models import CONFIG_SCHEMA_VERSION, AasgConfig, LocalFrameSource
 
-ALLOWED_TEMPLATE_FIELDS = {"capture", "locale", "theme", "artifact", "stem"}
+ALLOWED_TEMPLATE_FIELDS = {"capture", "locale", "theme", "navigation", "artifact", "stem"}
 
 
 def load_config(path: Path) -> AasgConfig:
@@ -106,7 +106,7 @@ def project_path(config_path: Path, value: str) -> Path:
 
 
 STARTER_CONFIG = """# AASG configuration. Paths are relative to this file.
-schema: 2
+schema: 4
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -136,12 +136,23 @@ captures:
   home:
     label: Home
     test: com.example.HomeScreenshotCaptureTest
+    navigation: ignore
     arguments: {screenshot: home, notAnnotation: ""}
     artifacts:
       - id: home
         type: image
         source: screenshots/{locale}/home-{theme}.png
         publish: screenshots/raw/{locale}/home-{theme}.png
+  walkthrough:
+    label: Walkthrough
+    test: com.example.WalkthroughVideoCaptureTest
+    show_taps: true
+    arguments: {recording: walkthrough}
+    artifacts:
+      - id: walkthrough
+        type: video
+        source: recordings/{locale}/walkthrough-{theme}.mp4
+        publish: videos/raw/{locale}/walkthrough-{theme}.mp4
 pipelines: {}
 frame_sources: {}
 """

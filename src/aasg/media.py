@@ -341,7 +341,7 @@ class MediaProcessor:
             "-f",
             "lavfi",
             "-i",
-            f"color=c={color}:s={info.width}x{info.height}",
+            f"color=c={color}:s={info.width}x{info.height},format=bgra",
             "-i",
             str(source),
             "-filter_complex",

@@ -76,4 +76,7 @@ file bytes.
   compatibility tests, and updates to maintained pilot configurations.
 - New FFmpeg operations include dry-run output and media-property tests.
 - Capture failures preserve successful outputs and leave a useful run manifest/log.
+- Before completing a task, run the local equivalents of every CI verification, including
+  `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy`, `uv run pytest`, and
+  `uv build`.
 - Ruff formatting/lint, mypy, pytest, and package build pass.
