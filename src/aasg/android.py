@@ -76,7 +76,11 @@ def redact_line(line: str, serial: str | None = None) -> str:
     return SECRET_PATTERN.sub(lambda match: f"{match.group(1)}=<redacted>", redacted)
 
 
-def _run_text(command: Sequence[str], timeout: float = 10) -> str:
+def redact_error(error: Exception, serial: str | None = None) -> str:
+    return redact_line(str(error), serial)
+
+
+def _run_text(command: Sequence[str], timeout: float = 10, *, serial: str | None = None) -> str:
     try:
         return subprocess.run(
             list(command),
@@ -88,7 +92,9 @@ def _run_text(command: Sequence[str], timeout: float = 10) -> str:
     except FileNotFoundError as error:
         raise PrerequisiteError(f"Executable not found: {command[0]}") from error
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise PrerequisiteError(f"Command failed: {' '.join(command)}") from error
+        raise PrerequisiteError(
+            f"Command failed: {redact_line(' '.join(command), serial)}"
+        ) from error
 
 
 def discover_devices(adb: str) -> list[Device]:
@@ -111,7 +117,10 @@ def discover_devices(adb: str) -> list[Device]:
 
 
 def enrich_device(adb: str, device: Device) -> Device:
-    raw_api = _run_text([adb, "-s", device.serial, "shell", "getprop", "ro.build.version.sdk"])
+    raw_api = _run_text(
+        [adb, "-s", device.serial, "shell", "getprop", "ro.build.version.sdk"],
+        serial=device.serial,
+    )
     try:
         api = int(raw_api.strip().replace("\r", ""))
     except ValueError as error:
@@ -120,11 +129,13 @@ def enrich_device(adb: str, device: Device) -> Device:
 
 
 def active_user(adb: str, serial: str) -> int:
-    raw_user = _run_text([adb, "-s", serial, "shell", "am", "get-current-user"])
+    raw_user = _run_text([adb, "-s", serial, "shell", "am", "get-current-user"], serial=serial)
     try:
         user = int(raw_user.strip().replace("\r", ""))
     except ValueError as error:
-        raise PrerequisiteError(f"Could not resolve the active Android user on {serial}") from error
+        raise PrerequisiteError(
+            f"Could not resolve the active Android user on {redact_serial(serial)}"
+        ) from error
     if user < 0:
         raise PrerequisiteError(f"Android returned an invalid active user: {user}")
     return user
@@ -147,7 +158,8 @@ def parse_navigation_state(output: str) -> NavigationState:
 
 def navigation_state(adb: str, serial: str, user: int) -> NavigationState:
     output = _run_text(
-        [adb, "-s", serial, "shell", "cmd", "overlay", "list", "--user", str(user), "android"]
+        [adb, "-s", serial, "shell", "cmd", "overlay", "list", "--user", str(user), "android"],
+        serial=serial,
     )
     return parse_navigation_state(output)
 
@@ -197,7 +209,8 @@ def show_taps_state(adb: str, serial: str, user: int) -> ShowTapsState:
                     adb,
                     serial,
                     ["settings", "--user", str(user), "get", "system", "show_touches"],
-                )
+                ),
+                serial=serial,
             )
         )
     except PrerequisiteError as error:
@@ -339,7 +352,8 @@ def run_supervised(
                 if remaining <= 0:
                     _terminate_process_group(process)
                     raise CaptureError(
-                        f"Command timed out after {timeout_seconds}s: {' '.join(command)}"
+                        f"Command timed out after {timeout_seconds}s: "
+                        f"{redact_line(' '.join(command), serial)}"
                     )
                 try:
                     line = lines.get(timeout=min(0.1, remaining))
@@ -476,13 +490,13 @@ class NavigationController:
                 f"Timed out waiting for Android navigation mode {mode!r} to become active"
             )
         except CaptureError as error:
-            event["error"] = str(error)
+            event["error"] = redact_error(error, self.serial)
             self.events.append(event)
             raise PrerequisiteError(
                 f"Could not switch Android navigation mode to {mode!r}"
             ) from error
         except Exception as error:
-            event["error"] = str(error)
+            event["error"] = redact_error(error, self.serial)
             self.events.append(event)
             raise
 
@@ -595,11 +609,11 @@ class ShowTapsController:
                 time.sleep(0.1)
             raise PrerequisiteError("Timed out waiting for Android Show taps to change")
         except CaptureError as error:
-            event["error"] = str(error)
+            event["error"] = redact_error(error, self.serial)
             self.events.append(event)
             raise PrerequisiteError("Could not update Android Show taps") from error
         except Exception as error:
-            event["error"] = str(error)
+            event["error"] = redact_error(error, self.serial)
             self.events.append(event)
             raise
 
@@ -646,6 +660,7 @@ def capture_logcat(adb: str, serial: str, destination: Path) -> None:
                 "*:S",
             ],
             timeout=15,
+            serial=serial,
         )
     except PrerequisiteError as error:
         output = f"Could not collect logcat: {error}\n"

@@ -211,7 +211,8 @@ A variant is first collected and rendered in its run staging directory. AASG val
 hashes it, and only then atomically updates stable output paths. A failed variant leaves earlier
 valid outputs intact. Run-manifest schema 3 records configuration, selected device model/API,
 navigation and Show taps changes and restoration, timings, checksums, renderer commands, and frame
-provenance; device serials and common credential patterns are redacted.
+provenance; device serials and common credential patterns are redacted from commands, logs, and
+persisted error details.
 
 ## Device frames and licensing
 

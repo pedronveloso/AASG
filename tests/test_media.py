@@ -605,4 +605,5 @@ def test_video_encoder_pads_odd_dimensions_with_pipeline_background(tmp_path: Pa
 
     info = probe(output)
     assert (info.width, info.height) == (102, 202)
+    assert "color=c=white:s=101x201,format=bgra" in result.commands[-2]
     assert "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=white" in result.commands[-1]

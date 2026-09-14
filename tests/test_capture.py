@@ -18,7 +18,7 @@ from aasg.capture import (
     has_selectable_navigation,
 )
 from aasg.config import load_config
-from aasg.errors import ExitCode, PrerequisiteError
+from aasg.errors import CaptureError, ExitCode, PrerequisiteError
 
 
 def test_expands_groups_and_all_variants(tmp_path: Path) -> None:
@@ -138,14 +138,17 @@ def test_preparation_failure_is_persisted(tmp_path: Path, monkeypatch) -> None: 
     data["android"]["prepare_tasks"] = [":app:assembleDebug"]
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     config = load_config(path)
-    monkeypatch.setattr(
-        "aasg.capture.run_supervised", lambda *args, **kwargs: CommandResult(1, 0.25)
-    )
+    serial = "device-serial-9876"
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise CaptureError(f"Gradle command failed for adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr("aasg.capture.run_supervised", fail)
 
     outcome = CaptureRunner().run(
         config=config,
         config_path=path,
-        device=Device("emulator-5554", "device"),
+        device=Device(serial, "device"),
         selection=Selection(["home"], ["en"], ["light"]),
     )
 
@@ -153,6 +156,10 @@ def test_preparation_failure_is_persisted(tmp_path: Path, monkeypatch) -> None: 
     assert outcome.exit_code == int(ExitCode.CAPTURE_FAILED)
     assert outcome.manifest["prepare_error"]
     assert (outcome.run_root / "run.json").is_file()
+    serialized = (outcome.run_root / "run.json").read_text()
+    assert serial not in serialized
+    assert "…9876" in outcome.manifest["prepare_error"]
+    assert "token=<redacted>" in outcome.manifest["prepare_error"]
 
 
 class FakeNavigationController:
@@ -160,7 +167,7 @@ class FakeNavigationController:
     original_mode = "three-button"
     current_mode = "three-button"
 
-    def __init__(self, *, restore_error: bool = False) -> None:
+    def __init__(self, *, restore_error: str | None = None) -> None:
         self.events: list[dict[str, object]] = []
         self.restore_error = restore_error
         self.restored = False
@@ -168,10 +175,16 @@ class FakeNavigationController:
     def require_modes(self, modes: set[str]) -> None:
         assert modes
 
+    def ensure(self, mode: str) -> dict[str, object]:
+        self.current_mode = mode
+        event: dict[str, object] = {"action": "switch", "mode": mode, "status": "succeeded"}
+        self.events.append(event)
+        return event
+
     def restore(self) -> dict[str, object]:
         self.restored = True
-        if self.restore_error:
-            raise PrerequisiteError("restore failed")
+        if self.restore_error is not None:
+            raise PrerequisiteError(self.restore_error)
         event: dict[str, object] = {
             "action": "restore",
             "mode": "three-button",
@@ -187,7 +200,7 @@ class FakeNavigationController:
 class FakeShowTapsController:
     user = 0
 
-    def __init__(self, *, restore_error: bool = False) -> None:
+    def __init__(self, *, restore_error: str | None = None) -> None:
         self.original_state = ShowTapsState(False, None)
         self.current_state = self.original_state
         self.events: list[dict[str, object]] = []
@@ -206,8 +219,8 @@ class FakeShowTapsController:
 
     def restore(self) -> dict[str, object]:
         self.restore_count += 1
-        if self.restore_error:
-            raise PrerequisiteError("show taps restore failed")
+        if self.restore_error is not None:
+            raise PrerequisiteError(self.restore_error)
         self.current_state = self.original_state
         event: dict[str, object] = {
             "action": "restore",
@@ -219,6 +232,90 @@ class FakeShowTapsController:
 
     def manual_restore_guidance(self) -> str:
         return "adb -s '<device-serial>' shell settings delete system show_touches"
+
+
+def test_navigation_initialization_error_is_redacted_from_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = configured_navigation_path(tmp_path)
+    config = load_config(path)
+    serial = "device-serial-9876"
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise PrerequisiteError(f"Command failed: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr("aasg.capture.active_user", fail)
+
+    outcome = CaptureRunner().run(
+        config=config,
+        config_path=path,
+        device=Device(serial, "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+    )
+
+    serialized = (outcome.run_root / "run.json").read_text()
+    assert outcome.manifest["navigation"]["status"] == "failed"
+    assert serial not in serialized
+    assert "…9876" in outcome.manifest["navigation"]["error"]
+    assert "token=<redacted>" in outcome.manifest["navigation"]["error"]
+
+
+def test_show_taps_initialization_error_is_redacted_from_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = configured_video_path(tmp_path)
+    config = load_config(path)
+    serial = "device-serial-9876"
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise PrerequisiteError(f"Command failed: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr("aasg.capture.active_user", fail)
+
+    outcome = CaptureRunner().run(
+        config=config,
+        config_path=path,
+        device=Device(serial, "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+    )
+
+    serialized = (outcome.run_root / "run.json").read_text()
+    assert outcome.manifest["show_taps"]["status"] == "failed"
+    assert serial not in serialized
+    assert "…9876" in outcome.manifest["show_taps"]["error"]
+    assert "token=<redacted>" in outcome.manifest["show_taps"]["error"]
+
+
+def test_variant_and_restoration_errors_are_redacted_from_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = configured_navigation_path(tmp_path)
+    config = load_config(path)
+    serial = "device-serial-9876"
+    controller = FakeNavigationController(
+        restore_error=f"Restore failed: adb -s {serial} token=secret-value"
+    )
+    monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
+    monkeypatch.setattr("aasg.capture.NavigationController.inspect", lambda **kwargs: controller)
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise CaptureError(f"Capture failed: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr("aasg.capture.run_supervised", fail)
+
+    outcome = CaptureRunner().run(
+        config=config,
+        config_path=path,
+        device=Device(serial, "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+    )
+
+    serialized = (outcome.run_root / "run.json").read_text()
+    assert outcome.manifest["variants"][0]["status"] == "failed"
+    assert outcome.manifest["navigation"]["restoration"]["status"] == "failed"
+    assert serial not in serialized
+    assert "…9876" in outcome.manifest["variants"][0]["error"]
+    assert "token=<redacted>" in outcome.manifest["navigation"]["restoration"]["error"]
 
 
 @pytest.mark.parametrize("configured", [True, False])
@@ -262,7 +359,7 @@ def test_show_taps_restoration_failure_prevents_video_publication(
 ) -> None:  # type: ignore[no-untyped-def]
     path = configured_video_path(tmp_path)
     config = load_config(path)
-    controller = FakeShowTapsController(restore_error=True)
+    controller = FakeShowTapsController(restore_error="show taps restore failed")
     monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
     monkeypatch.setattr("aasg.capture.ShowTapsController.inspect", lambda **kwargs: controller)
     monkeypatch.setattr(
@@ -330,7 +427,7 @@ def configured_navigation_path(tmp_path: Path) -> Path:
 def test_restoration_failure_sets_prerequisite_exit_code(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     path = configured_navigation_path(tmp_path)
     config = load_config(path)
-    controller = FakeNavigationController(restore_error=True)
+    controller = FakeNavigationController(restore_error="restore failed")
     monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
     monkeypatch.setattr("aasg.capture.NavigationController.inspect", lambda **kwargs: controller)
     runner = CaptureRunner()
@@ -358,7 +455,7 @@ def test_capture_failure_remains_authoritative_and_restores_navigation(
 ) -> None:  # type: ignore[no-untyped-def]
     path = configured_navigation_path(tmp_path)
     config = load_config(path)
-    controller = FakeNavigationController(restore_error=True)
+    controller = FakeNavigationController(restore_error="restore failed")
     monkeypatch.setattr("aasg.capture.active_user", lambda *args: 0)
     monkeypatch.setattr("aasg.capture.NavigationController.inspect", lambda **kwargs: controller)
     runner = CaptureRunner()

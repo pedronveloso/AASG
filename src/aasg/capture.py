@@ -21,6 +21,7 @@ from aasg.android import (
     gradle_command,
     instrumentation_command,
     instrumentation_succeeded,
+    redact_error,
     redact_serial,
     run_supervised,
 )
@@ -231,7 +232,7 @@ class CaptureRunner:
                 navigation_manifest = {
                     "status": "failed",
                     "required": sorted(required_modes),
-                    "error": str(error),
+                    "error": redact_error(error, device.serial),
                     "events": [],
                     "restoration": {"status": "not-needed"},
                 }
@@ -295,7 +296,7 @@ class CaptureRunner:
                 show_taps_manifest = {
                     "status": "failed",
                     "required": sorted(required_show_taps),
-                    "error": str(error),
+                    "error": redact_error(error, device.serial),
                     "events": [],
                     "restoration": {"status": "not-needed"},
                 }
@@ -335,7 +336,7 @@ class CaptureRunner:
                         raise CaptureError("Gradle preparation failed; see prepare.log")
                 except Exception as error:
                     code = self._error_code(error)
-                    manifest["prepare_error"] = str(error)
+                    manifest["prepare_error"] = redact_error(error, device.serial)
                     if navigation is not None:
                         navigation_manifest["restoration"] = {"status": "unchanged"}
                     if show_taps is not None:
@@ -388,7 +389,7 @@ class CaptureRunner:
                     restoration_error = error
                     navigation_manifest["restoration"] = {
                         "status": "failed",
-                        "error": str(error),
+                        "error": redact_error(error, device.serial),
                         "manual_command": navigation.manual_restore_guidance(),
                     }
                 navigation_manifest["events"] = navigation.events
@@ -399,7 +400,7 @@ class CaptureRunner:
                     restoration_error = restoration_error or error
                     show_taps_manifest["restoration"] = {
                         "status": "failed",
-                        "error": str(error),
+                        "error": redact_error(error, device.serial),
                         "manual_command": show_taps.manual_restore_guidance(),
                     }
                 show_taps_manifest["events"] = show_taps.events
@@ -532,14 +533,16 @@ class CaptureRunner:
                             show_taps_restoration_error = error
                             variant["show_taps_restoration"] = {
                                 "status": "failed",
-                                "error": str(error),
+                                "error": redact_error(error, device.serial),
                                 "manual_command": show_taps.manual_restore_guidance(),
                             }
                 if interruption is not None:
                     raise interruption
                 if command_error is not None:
                     if show_taps_restoration_error is not None:
-                        variant["show_taps_restoration_error"] = str(show_taps_restoration_error)
+                        variant["show_taps_restoration_error"] = redact_error(
+                            show_taps_restoration_error, device.serial
+                        )
                     raise command_error
                 if show_taps_restoration_error is not None:
                     raise show_taps_restoration_error
@@ -563,7 +566,7 @@ class CaptureRunner:
                     publish_atomically(source, destination)
             variant["status"] = "succeeded"
         except Exception as error:  # continue the requested capture matrix
-            variant["error"] = str(error)
+            variant["error"] = redact_error(error, device.serial)
             variant["exit_code"] = self._error_code(error)
         return variant
 

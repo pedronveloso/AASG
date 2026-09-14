@@ -108,10 +108,10 @@ def test_builds_direct_instrumentation_with_numeric_user_and_empty_argument() ->
 
 
 def test_reads_and_validates_active_android_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(android, "_run_text", lambda command: "0\n")
+    monkeypatch.setattr(android, "_run_text", lambda command, **kwargs: "0\n")
     assert active_user("adb", "ABC") == 0
 
-    monkeypatch.setattr(android, "_run_text", lambda command: "-2\n")
+    monkeypatch.setattr(android, "_run_text", lambda command, **kwargs: "-2\n")
     with pytest.raises(PrerequisiteError, match="invalid active user"):
         active_user("adb", "ABC")
 
@@ -135,7 +135,7 @@ def test_parses_show_taps_state_and_builds_active_user_commands() -> None:
 def test_reads_show_taps_for_active_user(monkeypatch: pytest.MonkeyPatch) -> None:
     commands: list[list[str]] = []
 
-    def run(command):  # type: ignore[no-untyped-def]
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
         commands.append(list(command))
         return "1\n"
 
@@ -378,6 +378,72 @@ def test_navigation_controller_reports_verification_timeout(
     assert controller.events[-1]["status"] == "failed"
 
 
+def test_navigation_controller_redacts_failed_event_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serial = "device-serial-9876"
+    monkeypatch.setattr(
+        android,
+        "navigation_state",
+        lambda *args: NavigationState(("gestural", "three-button"), ("three-button",)),
+    )
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise CaptureError(f"Command timed out: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr(android, "run_supervised", fail)
+    controller = NavigationController(
+        adb="adb",
+        serial=serial,
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "navigation.log",
+        available=("gestural", "three-button"),
+        original_mode="three-button",
+        settle_seconds=0,
+    )
+
+    with pytest.raises(PrerequisiteError, match="Could not switch") as error:
+        controller.ensure("gestural")
+
+    assert serial not in str(error.value)
+    assert serial not in controller.events[-1]["error"]
+    assert "…9876" in controller.events[-1]["error"]
+    assert "token=<redacted>" in controller.events[-1]["error"]
+
+
+def test_show_taps_controller_redacts_failed_event_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serial = "device-serial-9876"
+    monkeypatch.setattr(
+        android,
+        "show_taps_state",
+        lambda *args: ShowTapsState(True, False),
+    )
+
+    def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise CaptureError(f"Command timed out: adb -s {serial} token=secret-value")
+
+    monkeypatch.setattr(android, "run_supervised", fail)
+    controller = ShowTapsController(
+        adb="adb",
+        serial=serial,
+        user=0,
+        cwd=tmp_path,
+        log_path=tmp_path / "show-taps.log",
+        original_state=ShowTapsState(True, False),
+    )
+
+    with pytest.raises(PrerequisiteError, match="Could not update") as error:
+        controller.ensure(True)
+
+    assert serial not in str(error.value)
+    assert serial not in controller.events[-1]["error"]
+    assert "…9876" in controller.events[-1]["error"]
+    assert "token=<redacted>" in controller.events[-1]["error"]
+
+
 def test_recognizes_instrumentation_result() -> None:
     assert instrumentation_succeeded(
         CommandResult(0, 1.0, ("OK (1 test)", "INSTRUMENTATION_CODE: -1"))
@@ -388,10 +454,15 @@ def test_recognizes_instrumentation_result() -> None:
 
 
 def test_supervised_command_times_out_even_without_output(tmp_path: Path) -> None:
-    with pytest.raises(CaptureError, match="timed out"):
+    serial = "device-serial-9876"
+    with pytest.raises(CaptureError, match="timed out") as error:
         run_supervised(
-            [sys.executable, "-c", "import time; time.sleep(5)"],
+            [sys.executable, "-c", "import time; time.sleep(5)", serial],
             cwd=tmp_path,
             timeout_seconds=1,
             log_path=tmp_path / "command.log",
+            serial=serial,
         )
+
+    assert serial not in str(error.value)
+    assert "…9876" in str(error.value)
