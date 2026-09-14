@@ -39,7 +39,7 @@ def test_rejects_capture_with_video_and_image_artifacts(tmp_path: Path) -> None:
     capture["artifacts"].append(video)
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
-    with pytest.raises(ConfigurationError, match="video artifacts.*not image artifacts"):
+    with pytest.raises(ConfigurationError, match=r"video artifacts.*not image artifacts"):
         load_config(path)
 
 

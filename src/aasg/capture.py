@@ -267,8 +267,10 @@ class CaptureRunner:
             }
         elif required_show_taps:
             try:
-                user = navigation.user if navigation is not None else active_user(
-                    config.android.adb, device.serial
+                user = (
+                    navigation.user
+                    if navigation is not None
+                    else active_user(config.android.adb, device.serial)
                 )
                 show_taps = ShowTapsController.inspect(
                     adb=config.android.adb,
@@ -481,9 +483,7 @@ class CaptureRunner:
                 try:
                     if recording:
                         if show_taps is None:
-                            raise PrerequisiteError(
-                                "Android Show taps control was not initialized"
-                            )
+                            raise PrerequisiteError("Android Show taps control was not initialized")
                         variant["show_taps_event"] = show_taps.ensure(capture.show_taps)
                         variant["effective_show_taps"] = show_taps.current_state.effective
                     if direct:
@@ -539,9 +539,7 @@ class CaptureRunner:
                     raise interruption
                 if command_error is not None:
                     if show_taps_restoration_error is not None:
-                        variant["show_taps_restoration_error"] = str(
-                            show_taps_restoration_error
-                        )
+                        variant["show_taps_restoration_error"] = str(show_taps_restoration_error)
                     raise command_error
                 if show_taps_restoration_error is not None:
                     raise show_taps_restoration_error

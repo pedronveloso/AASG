@@ -289,14 +289,10 @@ def test_show_taps_restoration_failure_prevents_video_publication(
     assert outcome.failed == 1
     assert outcome.exit_code == int(ExitCode.UNAVAILABLE)
     assert outcome.manifest["show_taps"]["restoration"]["status"] == "failed"
-    assert "<device-serial>" in outcome.manifest["show_taps"]["restoration"][
-        "manual_command"
-    ]
+    assert "<device-serial>" in outcome.manifest["show_taps"]["restoration"]["manual_command"]
 
 
-def test_interruption_restores_show_taps_and_persists_manifest(
-    tmp_path: Path, monkeypatch
-) -> None:  # type: ignore[no-untyped-def]
+def test_interruption_restores_show_taps_and_persists_manifest(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     path = configured_video_path(tmp_path)
     config = load_config(path)
     controller = FakeShowTapsController()

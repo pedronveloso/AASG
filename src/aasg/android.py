@@ -201,14 +201,10 @@ def show_taps_state(adb: str, serial: str, user: int) -> ShowTapsState:
             )
         )
     except PrerequisiteError as error:
-        raise PrerequisiteError(
-            "Could not read Android Show taps for the active user"
-        ) from error
+        raise PrerequisiteError("Could not read Android Show taps for the active user") from error
 
 
-def show_taps_update_command(
-    adb: str, serial: str, user: int, value: bool | None
-) -> list[str]:
+def show_taps_update_command(adb: str, serial: str, user: int, value: bool | None) -> list[str]:
     operation = ["delete", "system", "show_touches"]
     if value is not None:
         operation = ["put", "system", "show_touches", "1" if value else "0"]
@@ -584,9 +580,7 @@ class ShowTapsController:
                 append=self.log_path.exists(),
             )
             if result.returncode:
-                raise PrerequisiteError(
-                    f"Android Show taps update returned {result.returncode}"
-                )
+                raise PrerequisiteError(f"Android Show taps update returned {result.returncode}")
             deadline = time.monotonic() + self.verify_timeout_seconds
             while True:
                 verified = show_taps_state(self.adb, self.serial, self.user)
