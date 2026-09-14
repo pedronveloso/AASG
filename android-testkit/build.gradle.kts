@@ -22,6 +22,12 @@ kotlin {
     }
 }
 
+tasks.withType<Jar>().configureEach {
+    from(rootProject.file("../LICENSE")) {
+        into("META-INF")
+    }
+}
+
 dependencies {
     testImplementation(kotlin("test"))
 }
