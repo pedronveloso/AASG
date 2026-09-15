@@ -101,4 +101,23 @@ class GestureTimelineTest {
             timeline.tap(GesturePoint(100, 20)) {}
         }
     }
+
+    @Test
+    fun `rejects timed drag coordinates outside the source video`() {
+        val timeline = GestureTimeline(
+            media = "demo.mp4",
+            width = 100,
+            height = 200,
+            output = ByteArrayOutputStream(),
+        ).start()
+
+        assertFailsWith<IllegalArgumentException> {
+            timeline.drag(
+                listOf(
+                    TimedGesturePoint(0, 10, 10),
+                    TimedGesturePoint(100, 20, 200),
+                ),
+            ) {}
+        }
+    }
 }

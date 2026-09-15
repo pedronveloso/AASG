@@ -751,8 +751,10 @@ class CaptureRunner:
                 "renditions": [],
             }
             if metadata_path is not None:
+                metadata_template = artifact.metadata
+                assert metadata_template is not None
                 record["metadata"] = {
-                    "source": render_template(artifact.metadata or "", **artifact_values),
+                    "source": render_template(metadata_template, **artifact_values),
                     "sha256": sha256(metadata_path),
                 }
             publications.append((staged_source, destination))
