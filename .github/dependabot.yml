@@ -25,6 +25,18 @@ updates:
       prefix: "build"
       include: "scope"
 
+  - package-ecosystem: "gradle"
+    directory: "/android-testkit"
+    schedule:
+      interval: "monthly"
+    groups:
+      android-testkit-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

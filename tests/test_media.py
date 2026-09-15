@@ -55,6 +55,30 @@ def rgba_pixels(path: Path) -> bytes:
     ).stdout
 
 
+def video_rgba_pixels(path: Path, *, at_seconds: float) -> bytes:
+    return subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(at_seconds),
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "pipe:1",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
 def make_local_frame(
     root: Path,
     *,
@@ -387,6 +411,94 @@ def test_framed_trimmed_video(tmp_path: Path) -> None:
     assert info.duration == pytest.approx(1.0, abs=0.1)
     assert stream == {"codec_name": "h264", "pix_fmt": "yuv420p", "r_frame_rate": "30/1"}
     assert result.frames[0]["license"] == "CC0-1.0"
+
+
+def test_video_gesture_overlay_renders_metadata_timeline(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:size=160x320:rate=30:duration=2",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        check=True,
+    )
+    metadata = tmp_path / "source.metadata.json"
+    metadata.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "media": source.name,
+                "coordinate_space": {"width": 160, "height": 320, "origin": "top-left"},
+                "gestures": [
+                    {"type": "tap", "at_ms": 500, "cue_lead_ms": 100, "x": 80, "y": 240},
+                    {
+                        "type": "swipe",
+                        "at_ms": 1200,
+                        "cue_lead_ms": 100,
+                        "duration_ms": 300,
+                        "from": {"x": 130, "y": 160},
+                        "to": {"x": 30, "y": 160},
+                    },
+                ],
+            }
+        )
+    )
+    path = write_config(
+        tmp_path,
+        {
+            "pipelines": {
+                "promo": {
+                    "frame_rate": 30,
+                    "steps": [{"type": "gesture_overlay", "radius_px": 24}],
+                }
+            }
+        },
+    )
+    config = load_config(path)
+    output = tmp_path / "promo.mp4"
+
+    result = MediaProcessor().process(
+        source,
+        output,
+        config.pipelines["promo"],
+        config=config,
+        config_path=path,
+        metadata_path=metadata,
+    )
+
+    info = probe(output)
+    tap_pixels = video_rgba_pixels(output, at_seconds=0.7)
+    before_pixels = video_rgba_pixels(output, at_seconds=0.2)
+    tap_center = (240 * info.width + 80) * 4
+    assert (info.width, info.height) == (160, 320)
+    assert info.duration == pytest.approx(2.0, abs=0.1)
+    assert max(tap_pixels[tap_center : tap_center + 3]) > 150
+    assert max(before_pixels[tap_center : tap_center + 3]) < 30
+    assert "rawvideo" in result.commands[0]
+    assert "pipe:0" in result.commands[0]
+
+    dry_run = MediaProcessor().process(
+        source,
+        tmp_path / "planned.mp4",
+        config.pipelines["promo"],
+        config=config,
+        config_path=path,
+        metadata_path=metadata,
+        dry_run=True,
+    )
+    assert "gesture" in dry_run.commands[0]
 
 
 def test_device_frame_crops_transparent_margins_and_records_bounds(tmp_path: Path) -> None:

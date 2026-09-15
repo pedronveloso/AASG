@@ -14,6 +14,12 @@ from typing import Any
 
 from aasg.errors import PrerequisiteError, ProcessingError
 from aasg.frames import FrameAsset, resolve_frame
+from aasg.gestures import (
+    execute_gesture_overlay,
+    gesture_frames,
+    gesture_overlay_command,
+    validate_gesture_metadata,
+)
 from aasg.models import (
     AasgConfig,
     BackgroundStep,
@@ -22,6 +28,7 @@ from aasg.models import (
     DeviceFrameStep,
     EdgeFadeStep,
     FeatherStep,
+    GestureOverlayStep,
     PadStep,
     PipelineConfig,
     RedactStep,
@@ -111,10 +118,45 @@ class MediaProcessor:
             for index, step in enumerate(pipeline.steps):
                 if info.kind == "video" and isinstance(step, (EdgeFadeStep, FeatherStep)):
                     raise ProcessingError(f"{step.type} supports images only")
-                if info.kind == "image" and isinstance(step, (TrimStep, TemporalFadeStep)):
+                if info.kind == "image" and isinstance(
+                    step, (TrimStep, TemporalFadeStep, GestureOverlayStep)
+                ):
                     raise ProcessingError(f"{step.type} supports videos only")
                 suffix = ".png" if info.kind == "image" else ".mkv"
                 output = temporary_root / f"step-{index:02d}{suffix}"
+                if isinstance(step, GestureOverlayStep):
+                    gesture_metadata = validate_gesture_metadata(
+                        metadata,
+                        step,
+                        width=info.width,
+                        height=info.height,
+                        duration=info.duration,
+                    )
+                    assert info.duration is not None
+                    command = gesture_overlay_command(
+                        self.ffmpeg,
+                        current,
+                        output,
+                        width=info.width,
+                        height=info.height,
+                        duration=info.duration,
+                        frame_rate=pipeline.frame_rate,
+                    )
+                    commands.append(shlex.join(command))
+                    if not dry_run:
+                        execute_gesture_overlay(
+                            command,
+                            gesture_frames(
+                                gesture_metadata,
+                                step,
+                                width=info.width,
+                                height=info.height,
+                                duration=info.duration,
+                                frame_rate=pipeline.frame_rate,
+                            ),
+                        )
+                        current = output
+                    continue
                 command, info, provenance = self._command_for_step(
                     current,
                     output,

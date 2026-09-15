@@ -27,6 +27,9 @@ node_modules/
 npm-debug.log*
 .husky/_/
 
+# Gradle caches
+.gradle/
+
 # Local environment and editor files
 .env
 .env.*

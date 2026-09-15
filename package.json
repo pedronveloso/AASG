@@ -1,5 +1,5 @@
 {
-  "name": "android-auto-screengrabs-development",
+  "name": "android-automated-screengrabs-development",
   "private": true,
   "description": "Development-only commit message tooling for AASG",
   "scripts": {

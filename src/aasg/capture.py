@@ -175,7 +175,7 @@ class CaptureRunner:
         run_root.mkdir(parents=True, exist_ok=True)
         additional_output = project_path(config_path, config.android.additional_output_dir)
         manifest: dict[str, Any] = {
-            "schema": 3,
+            "schema": 4,
             "run_id": run_id,
             "started_at": datetime.now(UTC).isoformat(),
             "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
@@ -718,15 +718,19 @@ class CaptureRunner:
                             "status": "planned",
                         }
                     )
-                staged_records.append(
-                    {
-                        "id": artifact.id,
-                        "source": source_suffix,
-                        "publish": str(destination),
+                planned_record: dict[str, Any] = {
+                    "id": artifact.id,
+                    "source": source_suffix,
+                    "publish": str(destination),
+                    "status": "planned",
+                    "renditions": planned_renditions,
+                }
+                if artifact.metadata:
+                    planned_record["metadata"] = {
+                        "source": render_template(artifact.metadata, **artifact_values),
                         "status": "planned",
-                        "renditions": planned_renditions,
                     }
-                )
+                staged_records.append(planned_record)
                 continue
             source = find_fresh_output(additional_output, source_suffix, before)
             staged_source = staging_root / "raw" / source.name
@@ -746,6 +750,13 @@ class CaptureRunner:
                 "sha256": sha256(staged_source),
                 "renditions": [],
             }
+            if metadata_path is not None:
+                metadata_template = artifact.metadata
+                assert metadata_template is not None
+                record["metadata"] = {
+                    "source": render_template(metadata_template, **artifact_values),
+                    "sha256": sha256(metadata_path),
+                }
             publications.append((staged_source, destination))
             for rendition_index, rendition in enumerate(artifact.renditions):
                 rendition_relative = render_template(rendition.publish, **artifact_values)

@@ -101,19 +101,64 @@ Tests can attach named UI regions to captured media:
 Coordinates use integer pixels relative to the media with a top-left origin. Recipes can crop or
 redact a named region without duplicating UI coordinates on the host.
 
+For promotional recordings, add the lightweight test helper to the app's instrumentation-test
+dependencies:
+
+```kotlin
+androidTestImplementation("com.pedronveloso.aasg:aasg-testkit:0.6.0")
+```
+
+Start a `GestureTimeline` immediately after the app-owned screen recorder starts, and write its
+output through AndroidX Test Storage. The helper wraps existing test actions; it does not introduce
+another automation engine:
+
+```kotlin
+PlatformTestStorageRegistry.getInstance()
+  .openOutputFile("recordings/onboarding.metadata.json")
+  .use { output ->
+    GestureTimeline(
+      media = "onboarding.mp4",
+      width = 1080,
+      height = 2400,
+      output = output,
+      synchronize = { composeRule.waitForIdle() },
+    ).start().use { journey ->
+      journey.tap(GesturePoint(540, 1800)) {
+        composeRule.onNodeWithTag("continue").performClick()
+      }
+      journey.swipe(
+        from = GesturePoint(900, 1200),
+        to = GesturePoint(180, 1200),
+        durationMs = 450,
+      ) {
+        composeRule.onNodeWithTag("carousel").performTouchInput {
+          swipeLeft(durationMillis = 450)
+        }
+      }
+    }
+  }
+```
+
+The default pacing waits 700 ms before each cue and 900 ms after each action. Together with the
+idle callback, this gives a newly opened screen at least 1.6 seconds to remain readable before the
+next gesture. `GesturePacing` can tune the before-action hold, cue lead, and after-action hold for a
+journey. Coordinates and gesture durations must describe the source recording exactly. See
+[`android-testkit/README.md`](android-testkit/README.md) for the complete helper contract.
+
 ## Configuration
 
 `aasg.yaml` is strict and versioned. Unknown fields, missing references, unsafe paths, incompatible
 schema versions, and invalid pipeline combinations fail before a test starts. All relative paths
 resolve from the configuration file.
 
-AASG 0.4 uses configuration schema 4. To migrate a schema 3 configuration, change its top-level
-`schema` value to `4`. Video captures default to `show_taps: true`; set it to `false` when touch
-feedback should be hidden. A video capture may also declare JSON artifacts, but it cannot mix video
-and image artifacts. Split mixed visual output into separate captures before migrating.
+AASG 0.5 uses configuration schema 5. To migrate a schema 4 configuration, change its top-level
+`schema` value to `5`. Existing recipes retain their meaning. Schema 5 adds the typed
+`gesture_overlay` video operation. A video rendition using it must declare semantic metadata and
+set `show_taps: false`, preventing Android's native Show taps circles and the rendered cues from
+appearing together.
 
 ```yaml
-schema: 4
+schema: 5
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -159,15 +204,29 @@ captures:
   walkthrough:
     label: Onboarding walkthrough
     test: com.example.OnboardingVideoCaptureTest
-    show_taps: true
+    show_taps: false
     arguments: {recording: onboarding}
     artifacts:
       - id: walkthrough
         type: video
         source: recordings/{locale}/onboarding-{theme}.mp4
+        metadata: recordings/{locale}/onboarding-{theme}.metadata.json
         publish: videos/raw/{locale}/onboarding-{theme}.mp4
+        renditions:
+          - publish: videos/promo/{locale}/onboarding-{theme}.mp4
+            pipeline: promo-video
 
 pipelines:
+  promo-video:
+    frame_rate: 30
+    crf: 18
+    steps:
+      - type: gesture_overlay
+        color: "#FFFFFF"
+        halo_color: "#000000A0"
+        radius_px: 44
+        trail: true
+        motion: standard
   pixel-8:
     steps:
       - type: device_frame
@@ -186,17 +245,47 @@ Artifact `source` is an exact suffix inside the AGP additional-output tree. `pub
 paths stay under `project.artifact_root`. Captures accept `navigation: gestural`, `three-button`,
 `all`, or `ignore` (the default). Only `all` captures use the repeatable `--navigation` selection;
 their publication paths must contain an actual `{navigation}` formatter field so modes cannot
-overwrite each other. AASG
-restores the device's original mode after the run. Captures containing a video artifact accept
+overwrite each other. AASG restores the device's original mode after the run. Captures containing a
+video artifact accept
 `show_taps: true` or `false`; the default is `true`. AASG applies the active Android user's setting
 only during the recording capture and restores the original value before publishing artifacts,
 including after failures and interruptions. Video captures may include JSON artifacts but not image
 artifacts. Show taps is entirely YAML-controlled and is never an interactive capture choice.
-Available typed operations are `resize`, `crop`, `pad`,
-`background`, `blur`, `redact`, `device_frame`, `edge_fade`, `feather`, `trim`, and
-`temporal_fade`. A `device_frame` step can set `crop_to_frame: true` to remove fully transparent
-canvas margins while preserving every non-zero alpha pixel in the frame artwork. It defaults to
-`false`.
+Available typed operations are `resize`, `crop`, `pad`, `background`, `blur`, `redact`,
+`gesture_overlay`, `device_frame`, `edge_fade`, `feather`, `trim`, and `temporal_fade`.
+`gesture_overlay` must be the first step because its coordinates refer to the unmodified source
+video. It supports tap ripples, eased swipe cues, sampled drag paths, an optional trail, configurable
+colors and radius, and `motion: reduced` static cues. With reduced motion, `trail: false` removes the
+connecting path while retaining the gesture's endpoint markers. Use `timing_offset_ms` only to
+correct a known recorder/timeline start offset. A `device_frame` step can set `crop_to_frame: true`
+to remove fully transparent canvas margins while preserving every non-zero alpha pixel in the frame
+artwork. It defaults to `false`.
+
+The helper writes semantic metadata schema 2:
+
+```json
+{
+  "schema": 2,
+  "media": "onboarding-light.mp4",
+  "coordinate_space": {"width": 1080, "height": 2400, "origin": "top-left"},
+  "gestures": [
+    {"type": "tap", "at_ms": 700, "cue_lead_ms": 120, "x": 540, "y": 1800},
+    {
+      "type": "swipe",
+      "at_ms": 2420,
+      "cue_lead_ms": 120,
+      "duration_ms": 450,
+      "from": {"x": 900, "y": 1200},
+      "to": {"x": 180, "y": 1200}
+    }
+  ]
+}
+```
+
+`at_ms` marks when the visual cue begins; the wrapped test action starts `cue_lead_ms` later. Drag
+events contain two or more `{offset_ms, x, y}` samples, starting at offset zero. AASG rejects
+unsorted events, out-of-bounds coordinates, mismatched dimensions, and gestures that extend beyond
+the video instead of silently rendering a misleading overlay.
 
 Process an existing file through any named pipeline:
 
@@ -210,10 +299,10 @@ Pass `--theme` when a pipeline uses a theme-keyed background color.
 
 A variant is first collected and rendered in its run staging directory. AASG validates the media,
 hashes it, and only then atomically updates stable output paths. A failed variant leaves earlier
-valid outputs intact. Run-manifest schema 3 records configuration, selected device model/API,
-navigation and Show taps changes and restoration, timings, checksums, renderer commands, and frame
-provenance; device serials and common credential patterns are redacted from commands, logs, and
-persisted error details.
+valid outputs intact. Run-manifest schema 4 records configuration, selected device model/API,
+navigation and Show taps changes and restoration, timings, media and semantic-metadata checksums,
+renderer commands, and frame provenance; device serials and common credential patterns are redacted
+from commands, logs, and persisted error details.
 
 ## Device frames and licensing
 
@@ -247,6 +336,7 @@ uv run ruff check .
 uv run mypy
 uv run pytest
 uv build
+(cd android-testkit && ./gradlew test build generatePomFileForMavenPublication)
 ```
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) and are checked
@@ -283,4 +373,6 @@ Python package metadata.
 ## License
 
 AASG source code and documentation are licensed under the Apache License 2.0. Third-party media
-downloaded through a frame provider retains its own terms.
+downloaded through a frame provider retains its own terms. Gesture-rendering design was informed by
+the MIT-licensed Open Screenshot Generator; attribution and its license are preserved in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

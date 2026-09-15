@@ -13,7 +13,7 @@ from aasg.errors import ConfigurationError
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 4
+    assert config.schema_version == 5
     assert config.captures["home"].test == "example.HomeCaptureTest"
     assert config.captures["home"].navigation == "ignore"
     assert config.captures["home"].show_taps is True
@@ -57,6 +57,67 @@ def test_accepts_capture_with_video_and_json_artifacts(tmp_path: Path) -> None:
         "video",
         "json",
     ]
+
+
+def test_accepts_video_gesture_overlay_with_metadata_and_native_taps_disabled(
+    tmp_path: Path,
+) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["show_taps"] = False
+    artifact = capture["artifacts"][0]
+    artifact["type"] = "video"
+    artifact["metadata"] = "recordings/home.metadata.json"
+    artifact["renditions"] = [{"publish": "recordings/home-promo.mp4", "pipeline": "promo"}]
+    data["pipelines"] = {"promo": {"steps": [{"type": "gesture_overlay"}]}}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    step = load_config(path).pipelines["promo"].steps[0]
+
+    assert step.model_dump() == {
+        "type": "gesture_overlay",
+        "color": "#FFFFFF",
+        "halo_color": "#000000A0",
+        "radius_px": 44,
+        "trail": True,
+        "timing_offset_ms": 0,
+        "motion": "standard",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("show_taps", "requires show_taps: false"),
+        ("metadata", "requires artifact metadata"),
+        ("image", "supports video artifacts only"),
+        ("order", "must be the first pipeline step"),
+        ("duplicate", "only one gesture_overlay"),
+    ],
+)
+def test_rejects_invalid_gesture_overlay_configuration(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["show_taps"] = mutation == "show_taps"
+    artifact = capture["artifacts"][0]
+    artifact["type"] = "image" if mutation == "image" else "video"
+    if mutation != "metadata":
+        artifact["metadata"] = "recordings/home.metadata.json"
+    artifact["renditions"] = [{"publish": "recordings/home-promo.mp4", "pipeline": "promo"}]
+    steps: list[dict[str, object]] = [{"type": "gesture_overlay"}]
+    if mutation == "order":
+        steps.insert(0, {"type": "resize", "width": 100, "height": 200})
+    if mutation == "duplicate":
+        steps.append({"type": "gesture_overlay"})
+    data["pipelines"] = {"promo": {"steps": steps}}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_config(path)
 
 
 @pytest.mark.parametrize("policy", ["gestural", "three-button", "all", "ignore"])
@@ -136,7 +197,7 @@ def test_all_navigation_accepts_literal_braces_with_navigation_field(tmp_path: P
     )
 
 
-@pytest.mark.parametrize("schema", [1, 2, 3, 5])
+@pytest.mark.parametrize("schema", [1, 2, 3, 4, 6])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int
 ) -> None:
@@ -144,7 +205,7 @@ def test_rejects_unsupported_config_schema_with_migration_guidance(
 
     with pytest.raises(
         ConfigurationError,
-        match=rf"Unsupported configuration schema {schema}.*requires schema 4.*migrate",
+        match=rf"Unsupported configuration schema {schema}.*requires schema 5.*migrate",
     ):
         load_config(path)
 
