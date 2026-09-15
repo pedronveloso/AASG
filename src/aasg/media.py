@@ -155,7 +155,7 @@ class MediaProcessor:
                                 frame_rate=pipeline.frame_rate,
                             ),
                         )
-                        current = output
+                    current = output
                     continue
                 command, info, provenance = self._command_for_step(
                     current,
@@ -172,7 +172,7 @@ class MediaProcessor:
                     frame_provenance.append(provenance)
                 if not dry_run:
                     self._execute(command)
-                    current = output
+                current = output
 
             final_temporary = temporary_root / (
                 "final.png" if info.kind == "image" else "final.mp4"

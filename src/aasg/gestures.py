@@ -6,6 +6,8 @@ import math
 import shlex
 import subprocess
 import tempfile
+import threading
+import time
 from collections.abc import Iterable, Iterator, Sequence
 from itertools import pairwise
 from pathlib import Path
@@ -30,6 +32,8 @@ Position = tuple[float, float]
 
 TAP_RELEASE_MS = 480
 GESTURE_RELEASE_MS = 200
+GESTURE_OVERLAY_TIMEOUT_SECONDS = 300
+GESTURE_WRITER_JOIN_TIMEOUT_SECONDS = 5
 
 
 def gesture_overlay_command(
@@ -178,21 +182,43 @@ def execute_gesture_overlay(command: list[str], frames: Iterable[bytes]) -> None
             )
         except FileNotFoundError as error:
             raise PrerequisiteError(f"Executable not found: {command[0]}") from error
-        assert process.stdin is not None
+        stdin = process.stdin
+        assert stdin is not None
+        started = time.monotonic()
         write_error: BrokenPipeError | None = None
+        producer_error: Exception | None = None
+
+        def write_frames() -> None:
+            nonlocal write_error, producer_error
+            try:
+                for frame in frames:
+                    stdin.write(frame)
+            except BrokenPipeError as error:
+                write_error = error
+            except Exception as error:
+                producer_error = error
+            finally:
+                try:
+                    stdin.close()
+                except BrokenPipeError as error:
+                    if write_error is None:
+                        write_error = error
+
+        writer = threading.Thread(target=write_frames, daemon=True)
+        writer.start()
         try:
-            for frame in frames:
-                process.stdin.write(frame)
-        except BrokenPipeError as error:
-            write_error = error
-        finally:
-            process.stdin.close()
-        try:
-            return_code = process.wait(timeout=300)
+            remaining = GESTURE_OVERLAY_TIMEOUT_SECONDS - (time.monotonic() - started)
+            return_code = process.wait(timeout=max(0, remaining))
         except subprocess.TimeoutExpired as error:
             process.kill()
             process.wait()
+            writer.join(timeout=GESTURE_WRITER_JOIN_TIMEOUT_SECONDS)
             raise ProcessingError(f"Media command timed out: {shlex.join(command)}") from error
+        writer.join(timeout=GESTURE_WRITER_JOIN_TIMEOUT_SECONDS)
+        if writer.is_alive():
+            raise ProcessingError(f"Media command frame writer did not stop: {shlex.join(command)}")
+        if producer_error is not None:
+            raise producer_error
         error_stream.seek(0)
         stderr = error_stream.read().decode("utf-8", errors="replace").strip()
         if return_code or write_error is not None:

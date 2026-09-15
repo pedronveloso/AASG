@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +31,28 @@ from aasg.android import (
 )
 from aasg.errors import CaptureError, PrerequisiteError
 from aasg.models import AndroidConfig, CaptureConfig, DirectInstrumentationConfig
+
+
+def test_android_testkit_wrapper_resolves_java_from_path(tmp_path: Path) -> None:
+    java_directory = tmp_path / "bin"
+    java_directory.mkdir()
+    java = java_directory / "java"
+    java.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    java.chmod(0o755)
+    environment = os.environ | {"PATH": str(java_directory)}
+    environment.pop("JAVA_HOME", None)
+
+    result = subprocess.run(
+        [str(Path(__file__).parents[1] / "android-testkit" / "gradlew"), "sentinel"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0
+    assert "org.gradle.wrapper.GradleWrapperMain" in result.stdout
+    assert "sentinel" in result.stdout
 
 
 def test_discovers_devices(monkeypatch: pytest.MonkeyPatch) -> None:

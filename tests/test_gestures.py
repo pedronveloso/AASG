@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import itertools
+import os
 import sys
+import time
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -184,3 +188,27 @@ def test_gesture_renderer_reports_missing_and_failed_processes() -> None:
             [sys.executable, "-c", "import sys; sys.stderr.write('renderer failed'); sys.exit(2)"],
             [],
         )
+
+
+def test_gesture_renderer_times_out_while_frame_writes_are_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid_path = tmp_path / "renderer.pid"
+    monkeypatch.setattr("aasg.gestures.GESTURE_OVERLAY_TIMEOUT_SECONDS", 0.5)
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import os, time; from pathlib import Path; "
+            f"Path({str(pid_path)!r}).write_text(str(os.getpid())); time.sleep(60)"
+        ),
+    ]
+
+    started = time.monotonic()
+    with pytest.raises(ProcessingError, match="timed out"):
+        execute_gesture_overlay(command, itertools.repeat(b"x" * 65_536))
+
+    assert time.monotonic() - started < 2
+    assert pid_path.is_file()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_path.read_text()), 0)
