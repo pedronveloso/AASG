@@ -85,6 +85,36 @@ def test_reduced_motion_uses_a_static_path() -> None:
     assert frame.getpixel((160, 320))[3] > 0
 
 
+@pytest.mark.parametrize(
+    ("time_ms", "path_point", "endpoint"),
+    [
+        pytest.param(1100, (160, 320), (260, 320), id="swipe"),
+        pytest.param(1900, (160, 420), (80, 500), id="drag"),
+    ],
+)
+def test_reduced_motion_respects_disabled_trail(
+    time_ms: int,
+    path_point: tuple[int, int],
+    endpoint: tuple[int, int],
+) -> None:
+    metadata = metadata_with_gestures()
+    with_trail = GestureOverlayStep(
+        type="gesture_overlay", radius_px=40, motion="reduced", trail=True
+    )
+    without_trail = GestureOverlayStep(
+        type="gesture_overlay", radius_px=40, motion="reduced", trail=False
+    )
+
+    trail_frame = render_gesture_frame(metadata, with_trail, width=320, height=640, time_ms=time_ms)
+    no_trail_frame = render_gesture_frame(
+        metadata, without_trail, width=320, height=640, time_ms=time_ms
+    )
+
+    assert trail_frame.getpixel(path_point)[3] > 0
+    assert no_trail_frame.getpixel(path_point)[3] == 0
+    assert no_trail_frame.getpixel(endpoint)[3] > 0
+
+
 def test_gesture_metadata_validates_dimensions_bounds_and_duration() -> None:
     metadata = metadata_with_gestures()
     step = GestureOverlayStep(type="gesture_overlay")

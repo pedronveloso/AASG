@@ -294,10 +294,11 @@ def _static_path(
     alpha: float,
 ) -> None:
     draw = ImageDraw.Draw(image, "RGBA")
-    halo_width = max(6, round(step.radius_px * 0.2))
-    line_width = max(3, round(step.radius_px * 0.09))
-    draw.line(positions, fill=_alpha(halo, alpha * 0.65), width=halo_width, joint="curve")
-    draw.line(positions, fill=_alpha(primary, alpha * 0.85), width=line_width, joint="curve")
+    if step.trail:
+        halo_width = max(6, round(step.radius_px * 0.2))
+        line_width = max(3, round(step.radius_px * 0.09))
+        draw.line(positions, fill=_alpha(halo, alpha * 0.65), width=halo_width, joint="curve")
+        draw.line(positions, fill=_alpha(primary, alpha * 0.85), width=line_width, joint="curve")
     endpoint_radius = step.radius_px * 0.2
     _circle(image, positions[0], endpoint_radius, primary, halo, alpha)
     _ring(image, positions[-1], step.radius_px * 0.3, primary, halo, alpha * 0.9)

@@ -255,10 +255,11 @@ Available typed operations are `resize`, `crop`, `pad`, `background`, `blur`, `r
 `gesture_overlay`, `device_frame`, `edge_fade`, `feather`, `trim`, and `temporal_fade`.
 `gesture_overlay` must be the first step because its coordinates refer to the unmodified source
 video. It supports tap ripples, eased swipe cues, sampled drag paths, an optional trail, configurable
-colors and radius, and `motion: reduced` static cues. Use `timing_offset_ms` only to correct a known
-recorder/timeline start offset. A `device_frame` step can set `crop_to_frame: true` to remove fully
-transparent canvas margins while preserving every non-zero alpha pixel in the frame artwork. It
-defaults to `false`.
+colors and radius, and `motion: reduced` static cues. With reduced motion, `trail: false` removes the
+connecting path while retaining the gesture's endpoint markers. Use `timing_offset_ms` only to
+correct a known recorder/timeline start offset. A `device_frame` step can set `crop_to_frame: true`
+to remove fully transparent canvas margins while preserving every non-zero alpha pixel in the frame
+artwork. It defaults to `false`.
 
 The helper writes semantic metadata schema 2:
 
