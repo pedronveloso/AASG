@@ -18,7 +18,7 @@ dependencies = [
   "platformdirs>=4.3,<5",
   "pydantic>=2.10,<3",
   "pyyaml>=6.0,<7",
-  "rich>=13.9,<15",
+  "rich>=13.9,<16",
   "typer>=0.15,<1",
 ]
 
@@ -27,7 +27,7 @@ aasg = "aasg.cli:app"
 
 [dependency-groups]
 dev = [
-  "mypy>=1.14,<2",
+  "mypy>=1.14,<3",
   "pytest>=8.3,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.9,<1",
