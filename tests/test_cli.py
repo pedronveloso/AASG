@@ -41,7 +41,7 @@ def test_package_versions_are_synchronized() -> None:
     packages = [
         package
         for package in lock["package"]
-        if package["name"] == "android-auto-screengrabs"
+        if package["name"] == "android-automated-screengrabs"
         and package.get("source") == {"editable": "."}
     ]
     testkit_properties = dict(

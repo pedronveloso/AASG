@@ -105,7 +105,7 @@ For promotional recordings, add the lightweight test helper to the app's instrum
 dependencies:
 
 ```kotlin
-androidTestImplementation("com.pedronveloso.aasg:aasg-testkit:0.5.1")
+androidTestImplementation("com.pedronveloso.aasg:aasg-testkit:0.6.0")
 ```
 
 Start a `GestureTimeline` immediately after the app-owned screen recorder starts, and write its
