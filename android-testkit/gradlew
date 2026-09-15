@@ -5,13 +5,15 @@ CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
 
 if [ -n "$JAVA_HOME" ]; then
     JAVACMD=$JAVA_HOME/bin/java
+    if [ ! -x "$JAVACMD" ]; then
+        echo "JAVA_HOME points to an invalid directory: $JAVA_HOME" >&2
+        exit 1
+    fi
 else
-    JAVACMD=java
-fi
-
-if [ ! -x "$JAVACMD" ]; then
-    echo "A Java runtime could not be found. Set JAVA_HOME or add java to PATH." >&2
-    exit 1
+    JAVACMD=$(command -v java) || {
+        echo "A Java runtime could not be found. Set JAVA_HOME or add java to PATH." >&2
+        exit 1
+    }
 fi
 
 exec "$JAVACMD" -Dorg.gradle.appname=gradlew -classpath "$CLASSPATH" \

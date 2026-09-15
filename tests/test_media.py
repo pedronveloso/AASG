@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -461,7 +462,10 @@ def test_video_gesture_overlay_renders_metadata_timeline(tmp_path: Path) -> None
             "pipelines": {
                 "promo": {
                     "frame_rate": 30,
-                    "steps": [{"type": "gesture_overlay", "radius_px": 24}],
+                    "steps": [
+                        {"type": "gesture_overlay", "radius_px": 24},
+                        {"type": "temporal_fade", "in_seconds": 0.1},
+                    ],
                 }
             }
         },
@@ -499,6 +503,11 @@ def test_video_gesture_overlay_renders_metadata_timeline(tmp_path: Path) -> None
         dry_run=True,
     )
     assert "gesture" in dry_run.commands[0]
+    planned_steps = [shlex.split(command) for command in dry_run.commands]
+    assert str(source) not in dry_run.commands[1]
+    assert str(source) not in dry_run.commands[2]
+    assert planned_steps[1][planned_steps[1].index("-i") + 1].endswith("step-00.mkv")
+    assert planned_steps[2][planned_steps[2].index("-i") + 1].endswith("step-01.mkv")
 
 
 def test_device_frame_crops_transparent_margins_and_records_bounds(tmp_path: Path) -> None:

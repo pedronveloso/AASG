@@ -151,7 +151,7 @@ journey. Coordinates and gesture durations must describe the source recording ex
 schema versions, and invalid pipeline combinations fail before a test starts. All relative paths
 resolve from the configuration file.
 
-AASG 0.5 uses configuration schema 5. To migrate a schema 4 configuration, change its top-level
+AASG 0.6 uses configuration schema 5. To migrate a schema 4 configuration, change its top-level
 `schema` value to `5`. Existing recipes retain their meaning. Schema 5 adds the typed
 `gesture_overlay` video operation. A video rendition using it must declare semantic metadata and
 set `show_taps: false`, preventing Android's native Show taps circles and the rendered cues from
