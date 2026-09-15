@@ -1,0 +1,81 @@
+# Paths are relative to this configuration file.
+schema: 5
+project:
+  artifact_root: artifacts
+  run_log_root: artifacts/aasg/runs
+  default_timeout_seconds: 90
+
+android:
+  min_api: 33
+  adb: adb
+  gradle_wrapper: ./gradlew
+  prepare_tasks: [":app:assembleDebug", ":app:assembleDebugAndroidTest"]
+  test_task: ":app:connectedDebugAndroidTest"
+  additional_output_dir: app/build/outputs/connected_android_test_additional_output
+  locale_argument: screenshotLocale
+  theme_argument: screenshotTheme
+  direct_instrumentation:
+    application_id: com.example.app
+    test_application_id: com.example.app.test
+    runner: com.example.TestRunner
+    app_apk: app/build/outputs/apk/debug/app-debug.apk
+    test_apk: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+    device_output_dir: /sdcard/Android/media/com.example.app/additional_test_output
+
+variants:
+  locales: {en: English, es: Spanish}
+  themes: {light: Light, dark: Dark}
+  groups: {store-screenshots: [home]}
+
+captures:
+  home:
+    label: Home screenshot
+    test: com.example.HomeScreenshotCaptureTest
+    navigation: all
+    arguments: {screenshot: home, notAnnotation: ""}
+    artifacts:
+      - id: home
+        type: image
+        source: screenshots/{locale}/home-{theme}.png
+        publish: screenshots/raw/{locale}/home-{theme}-{navigation}.png
+        renditions:
+          - publish: screenshots/framed/{locale}/home-{theme}-{navigation}.png
+            pipeline: pixel-8
+  walkthrough:
+    label: Onboarding walkthrough
+    test: com.example.OnboardingVideoCaptureTest
+    show_taps: false
+    arguments: {recording: onboarding}
+    artifacts:
+      - id: walkthrough
+        type: video
+        source: recordings/{locale}/onboarding-{theme}.mp4
+        metadata: recordings/{locale}/onboarding-{theme}.metadata.json
+        publish: videos/raw/{locale}/onboarding-{theme}.mp4
+        renditions:
+          - publish: videos/promo/{locale}/onboarding-{theme}.mp4
+            pipeline: promo-video
+
+pipelines:
+  promo-video:
+    frame_rate: 30
+    crf: 18
+    steps:
+      - type: gesture_overlay
+        color: "#FFFFFF"
+        halo_color: "#000000A0"
+        radius_px: 44
+        trail: true
+        motion: standard
+  pixel-8:
+    steps:
+      - type: device_frame
+        source: community
+        frame: android-phone/pixel-8/hazel
+        fit: cover
+        crop_to_frame: true
+
+frame_sources:
+  community:
+    kind: device-frames-media
+    allow_unlicensed_downloads: true

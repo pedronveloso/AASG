@@ -1,0 +1,54 @@
+---
+title: AASG
+description: Deterministic Android capture-to-publish pipelines.
+template: splash
+hero:
+  tagline: Deterministic Android capture-to-publish pipelines
+  actions:
+    - text: Start a capture
+      link: /getting-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: Read the schema
+      link: /reference/configuration/
+      icon: document
+---
+
+<div class="hero">
+
+AASG turns capture journeys that already live in Android instrumentation tests into
+repeatable screenshots, cut-outs, framed media, and promotional video. It keeps the
+application in charge of navigation and state while making the publication pipeline
+strict, inspectable, and safe to rerun.
+
+</div>
+
+## A narrow, deliberate boundary
+
+Your app owns UI automation, fixtures, permissions, synchronization, locale/theme
+application, and the moment a capture is made. AASG owns the capture matrix,
+supervised execution, AndroidX Test Storage collection, semantic metadata, typed
+media recipes, device-frame provenance, and stable final artifacts.
+
+It does not replace Compose testing, UI Automator, Gradle, ADB, or FFmpeg.
+
+## Start with a reliable first run
+
+1. Add AASG to an Android project that already has instrumentation capture tests.
+2. Generate `aasg.yaml` with `aasg init` and make its paths match the project.
+3. Validate the configuration, check the host and device, then capture one journey.
+
+See [Quickstart](/getting-started/quickstart/) for the full sequence, or jump to the
+[configuration reference](/reference/configuration/) when you are ready to define the
+capture matrix.
+
+## Designed for publishable media
+
+- A failed variant cannot overwrite a previously valid artifact.
+- AASG validates media and semantic metadata before a stable artifact is updated.
+- Device serials and likely credentials are redacted from persisted logs.
+- Third-party device artwork retains its own license and provenance.
+
+Future pages will include real AASG-generated screenshots and recordings in the documented
+`/media/screenshots/` and `/media/videos/` asset locations. Until then, the examples are
+text and configuration that can be run and reviewed directly.

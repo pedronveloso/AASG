@@ -1,0 +1,21 @@
+# AASG
+
+> AASG is a deterministic, code-first Android capture-to-publish tool. Android
+> instrumentation tests own app navigation and state; AASG owns capture variants,
+> collection, rendering, validation, and stable artifacts.
+
+Use the Markdown pages below for implementation details. This index describes AASG
+configuration schema 5 and the current published documentation.
+
+## Documentation
+
+- [Overview](https://pedronveloso.github.io/AASG/overview.md.txt): Product boundary and safety model.
+- [Quickstart](https://pedronveloso.github.io/AASG/getting-started/quickstart.md.txt): Install and run a first capture.
+- [Android test contract](https://pedronveloso.github.io/AASG/concepts/android-test-contract.md.txt): Responsibilities and AndroidX Test Storage.
+- [Capture workflow](https://pedronveloso.github.io/AASG/guides/capture-workflow.md.txt): Capture matrix, staging, manifests, and output safety.
+- [Rendering pipelines](https://pedronveloso.github.io/AASG/guides/rendering.md.txt): Typed image and video operations.
+- [Device frames and licensing](https://pedronveloso.github.io/AASG/guides/device-frames.md.txt): Frame sources and provenance.
+- [aasg.yaml schema](https://pedronveloso.github.io/AASG/reference/configuration.md.txt): Complete configuration reference and canonical example.
+- [CLI reference](https://pedronveloso.github.io/AASG/reference/cli.md.txt): Commands and options.
+- [Semantic metadata](https://pedronveloso.github.io/AASG/reference/semantic-metadata.md.txt): Region and gesture schemas.
+- [Contributing](https://pedronveloso.github.io/AASG/contributing.md.txt): Development and release practices.
