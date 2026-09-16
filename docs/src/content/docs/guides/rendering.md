@@ -44,9 +44,8 @@ metadata and `show_taps: false` on the capture.
 Run a pipeline against an existing file with the same validation rules:
 
 ```shell
-aasg process setup-card raw.png --metadata raw.metadata.json \
-  --theme light --output card.png
+aasg process social-video raw.mp4 --metadata raw.metadata.json --output promo.mp4
 ```
 
-Pass `--theme` only when the selected pipeline has a theme-keyed background color.
-Detailed field definitions are in the [schema reference](/reference/configuration/#pipelines).
+Pass `--theme` only when a pipeline uses a theme-keyed background color. Detailed field
+definitions are in the [schema reference](../reference/configuration/#pipelines).

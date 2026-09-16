@@ -28,4 +28,4 @@ the matching stable rendition only after the complete variant succeeds. It recor
 versioned manifests and redacted command logs so a published artifact can be traced
 back to its configuration and renderer inputs.
 
-Continue with [Quickstart](/getting-started/quickstart/) to make a first configuration.
+Continue with [Quickstart](../getting-started/quickstart/) to make a first configuration.

@@ -3,8 +3,9 @@ title: CLI reference
 description: Commands for configuring, capturing, processing, and managing frames.
 ---
 
-All commands accept `--config` or `-c` for an `aasg.yaml` path. Run `aasg --help` or
-`aasg <command> --help` to see Typer's current option descriptions.
+Commands that load an existing configuration accept `--config` or `-c` for an
+`aasg.yaml` path. `aasg init` instead takes an optional destination path. Run `aasg
+--help` or `aasg <command> --help` to see Typer's current option descriptions.
 
 ## `aasg init [PATH]`
 
@@ -12,7 +13,8 @@ Writes the starter configuration to `PATH`, defaulting to `aasg.yaml`. It refuse
 
 ## `aasg config validate`
 
-Loads and validates the strict YAML contract without connecting to Android. It reports the schema version and declared captures, locales, and themes.
+Loads and validates the strict YAML contract without connecting to Android. It prints the
+schema version plus capture and pipeline counts.
 
 ## `aasg doctor`
 
@@ -38,6 +40,10 @@ Without explicit arguments, an interactive run can reuse its previous successful
 
 Applies a named pipeline to an existing file. Use `--output` for the target, `--metadata` for semantic metadata, and `--theme` when a theme-keyed background requires it. `--dry-run` prints the planned renderer commands.
 
-## `aasg frames list|fetch|refresh SOURCE`
+## `aasg frames`
 
-`list` shows IDs exposed by a remote source. `fetch` caches one supplied frame ID. `refresh` updates the cached remote index only when requested. These commands do not operate on local sources.
+| Command | Behavior |
+| --- | --- |
+| `aasg frames list SOURCE` | Lists IDs exposed by one remote source. |
+| `aasg frames fetch SOURCE FRAME_ID` | Resolves and verifies one frame. Remote sources download it into the cache; local sources read the declared local pack. |
+| `aasg frames refresh [SOURCE]` | Refreshes one remote source, or every remote source when `SOURCE` is omitted. |

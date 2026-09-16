@@ -55,5 +55,5 @@ GestureTimeline(
 }
 ```
 
-See [Semantic metadata](/reference/semantic-metadata/) for the sidecar contract and
-[Rendering pipelines](/guides/rendering/) for `gesture_overlay`.
+See [Semantic metadata](../reference/semantic-metadata/) for the sidecar contract and
+[Rendering pipelines](../guides/rendering/) for `gesture_overlay`.

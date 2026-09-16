@@ -3,6 +3,7 @@ import { relative, resolve } from 'node:path';
 
 const output = resolve('dist');
 const contentRoot = resolve('src/content/docs');
+const deploymentBase = '/AASG/';
 const requiredFiles = [
   'index.html',
   'llms.txt',
@@ -58,6 +59,15 @@ for (const file of sourceFiles(contentRoot).filter((entry) => /\.(md|mdx)$/.test
     const route = target.endsWith('/') ? target : `${target}/`;
     if (!routes.has(route)) {
       throw new Error(`Broken internal documentation link in ${file}: ${target}`);
+    }
+  }
+}
+
+for (const file of sourceFiles(output).filter((entry) => entry.endsWith('.html'))) {
+  const html = readFileSync(file, 'utf8');
+  for (const [, target] of html.matchAll(/\bhref="(\/[^"#?][^"]*)"/g)) {
+    if (!target.startsWith(deploymentBase)) {
+      throw new Error(`Link is missing the deployment base in ${file}: ${target}`);
     }
   }
 }

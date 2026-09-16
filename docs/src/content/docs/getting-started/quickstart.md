@@ -41,8 +41,8 @@ aasg init
 
 The generated file is intentionally small. Update the Gradle task, AndroidX Test
 Storage output directory, test class, and artifact paths for your project. Read the
-[canonical schema example](/reference/configuration/#canonical-example) before adding
-variants and pipelines.
+[canonical schema example](../../reference/configuration/#canonical-example) before
+adding variants and pipelines.
 
 ## 3. Validate before running hardware
 
@@ -63,13 +63,16 @@ aasg capture home
 For CI or repeatable automation, make the selection explicit:
 
 ```shell
-aasg capture home --device emulator-5554 --locale en --theme light \
-  --navigation gestural --non-interactive
+aasg capture home --device emulator-5554 --locale en --theme light --non-interactive
 ```
+
+Add `--navigation gestural` or `--navigation three-button` only after the selected
+capture uses `navigation: all` and every artifact and rendition publication path includes
+`{navigation}`. That policy makes each system-navigation variant publish separately.
 
 Use `--dry-run` to inspect the selected matrix and commands without invoking Android
 tooling. A real run creates a run manifest and command logs under the configured
 run-log root, then prints the generated artifact paths.
 
-Next, learn how [the Android test contract](/concepts/android-test-contract/) and the
-[capture workflow](/guides/capture-workflow/) fit together.
+Next, learn how [the Android test contract](../../concepts/android-test-contract/) and
+the [capture workflow](../../guides/capture-workflow/) fit together.

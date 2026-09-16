@@ -26,6 +26,7 @@ dist/
 node_modules/
 npm-debug.log*
 .husky/_/
+docs/.astro/
 
 # Gradle caches
 .gradle/

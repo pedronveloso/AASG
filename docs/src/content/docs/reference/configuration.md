@@ -10,20 +10,9 @@ starts. All project-relative paths are resolved from this file.
 ## Canonical example
 
 The [full canonical configuration](https://github.com/pedronveloso/AASG/blob/main/docs/src/content/docs/reference/examples/aasg.yaml)
-is validated in AASG's Python test suite. It includes an image capture, a video capture,
-direct instrumentation, frame sources, and rendering pipelines.
-
-```yaml
-schema: 5
-project:
-  artifact_root: artifacts
-android:
-  test_task: ":app:connectedDebugAndroidTest"
-variants:
-  locales: {en: English}
-  themes: {light: Light}
-captures: {}
-```
+is validated through AASG's configuration loader in the Python test suite. It is a
+complete, copyable file with an image capture, a video capture, direct instrumentation,
+frame sources, and rendering pipelines.
 
 ## Top-level fields
 
@@ -156,4 +145,4 @@ and `crf` (default `18`, integer `0`–`51`). A pipeline may contain only one
 | `local` | Required `root` and `license`. |
 
 Remote artwork is never silently refreshed and does not inherit AASG's license. See
-[Device frames and licensing](/guides/device-frames/) for the operational contract.
+[Device frames and licensing](../guides/device-frames/) for the operational contract.
