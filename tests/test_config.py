@@ -13,7 +13,7 @@ from aasg.errors import ConfigurationError
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 5
+    assert config.schema_version == 6
     assert config.captures["home"].test == "example.HomeCaptureTest"
     assert config.captures["home"].navigation == "ignore"
     assert config.captures["home"].show_taps is True
@@ -197,7 +197,7 @@ def test_all_navigation_accepts_literal_braces_with_navigation_field(tmp_path: P
     )
 
 
-@pytest.mark.parametrize("schema", [1, 2, 3, 4, 6])
+@pytest.mark.parametrize("schema", [1, 2, 3, 4, 5, 7])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int
 ) -> None:
@@ -205,7 +205,7 @@ def test_rejects_unsupported_config_schema_with_migration_guidance(
 
     with pytest.raises(
         ConfigurationError,
-        match=rf"Unsupported configuration schema {schema}.*requires schema 5.*migrate",
+        match=rf"Unsupported configuration schema {schema}.*requires schema 6.*migrate",
     ):
         load_config(path)
 

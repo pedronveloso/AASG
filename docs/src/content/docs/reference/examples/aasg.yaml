@@ -1,5 +1,5 @@
 # Paths are relative to this configuration file.
-schema: 5
+schema: 6
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs

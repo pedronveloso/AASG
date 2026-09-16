@@ -18,7 +18,7 @@ frame sources, and rendering pipelines.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schema` | Yes | Must be `5`. Change only when migrating an AASG schema release. |
+| `schema` | Yes | Must be `6`. Change only when migrating an AASG schema release. |
 | `project` | No | Output and timeout defaults. |
 | `android` | Yes | Host commands and Android test output settings. |
 | `variants` | Yes | Named locale, theme, and capture-group values. |
@@ -88,6 +88,7 @@ Capture-level `locales` and `themes` can narrow these declared values.
 | `locales` | No | Selected locale IDs; each must exist in `variants.locales`. |
 | `themes` | No | Selected theme IDs; each must exist in `variants.themes`. |
 | `navigation` | No | `ignore`; one of `gestural`, `three-button`, `all`, `ignore`. |
+| `browser_role_holder` | No | Package temporarily assigned Android's Browser role for this journey; prior holder(s) are restored. |
 | `show_taps` | No | `true`; controls Android's Show taps setting for video captures. |
 | `artifacts` | Yes | Declared files produced by this test. |
 

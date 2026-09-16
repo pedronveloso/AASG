@@ -87,6 +87,7 @@ class CaptureConfig(StrictModel):
     locales: list[str] | None = None
     themes: list[str] | None = None
     navigation: NavigationPolicy = "ignore"
+    browser_role_holder: str | None = None
     show_taps: bool = True
     artifacts: list[ArtifactConfig]
 
@@ -97,6 +98,14 @@ class CaptureConfig(StrictModel):
             raise ValueError(
                 "captures with video artifacts may include JSON artifacts, but not image artifacts"
             )
+        return self
+
+    @model_validator(mode="after")
+    def safe_browser_role_holder(self) -> CaptureConfig:
+        if self.browser_role_holder is not None and not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", self.browser_role_holder
+        ):
+            raise ValueError("browser_role_holder must be an Android package name")
         return self
 
 
@@ -253,7 +262,7 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
-CONFIG_SCHEMA_VERSION = 5
+CONFIG_SCHEMA_VERSION = 6
 
 
 def _has_template_field(template: str, field: str) -> bool:
@@ -261,7 +270,7 @@ def _has_template_field(template: str, field: str) -> bool:
 
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[5] = Field(alias="schema")
+    schema_version: Literal[6] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig

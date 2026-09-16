@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from aasg.android import (
+    BrowserRoleController,
     CommandResult,
     Device,
     NavigationController,
@@ -153,6 +154,14 @@ def required_show_taps_values(config: AasgConfig, selection: Selection) -> set[b
     }
 
 
+def required_browser_role_holders(config: AasgConfig, selection: Selection) -> set[str]:
+    return {
+        holder
+        for capture_id in selection.captures
+        if (holder := config.captures[capture_id].browser_role_holder) is not None
+    }
+
+
 class CaptureRunner:
     def __init__(self, processor: MediaProcessor | None = None) -> None:
         self.processor = processor or MediaProcessor()
@@ -198,7 +207,9 @@ class CaptureRunner:
         env = {"ANDROID_SERIAL": device.serial}
         required_modes = required_navigation_modes(config, selection)
         required_show_taps = required_show_taps_values(config, selection)
+        required_browser_roles = required_browser_role_holders(config, selection)
         navigation: NavigationController | None = None
+        browser_role: BrowserRoleController | None = None
         navigation_manifest: dict[str, Any]
         if required_modes and dry_run:
             navigation_manifest = {
@@ -256,6 +267,56 @@ class CaptureRunner:
                 "restoration": {"status": "not-needed"},
             }
         manifest["navigation"] = navigation_manifest
+
+        browser_role_manifest: dict[str, Any]
+        if required_browser_roles and dry_run:
+            browser_role_manifest = {
+                "status": "planned",
+                "required": sorted(required_browser_roles),
+                "events": [],
+                "restoration": {"status": "planned"},
+            }
+        elif required_browser_roles:
+            try:
+                user = active_user(config.android.adb, device.serial)
+                browser_role = BrowserRoleController.inspect(
+                    adb=config.android.adb,
+                    serial=device.serial,
+                    user=user,
+                    cwd=project_root,
+                    log_path=run_root / "commands" / "browser-role.log",
+                    verbose=verbose,
+                )
+                browser_role_manifest = {
+                    "status": "managed",
+                    "original": list(browser_role.original_state.holders),
+                    "required": sorted(required_browser_roles),
+                    "events": browser_role.events,
+                    "restoration": {"status": "pending"},
+                }
+            except Exception as error:
+                code = self._error_code(error)
+                browser_role_manifest = {
+                    "status": "failed",
+                    "required": sorted(required_browser_roles),
+                    "error": redact_error(error, device.serial),
+                    "events": [],
+                    "restoration": {"status": "not-needed"},
+                }
+                manifest["browser_role"] = browser_role_manifest
+                manifest["completed_at"] = datetime.now(UTC).isoformat()
+                manifest["assets"] = []
+                manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
+                self._write_manifest(run_root, manifest)
+                return CaptureOutcome(run_root, 0, 1, code, manifest)
+        else:
+            browser_role_manifest = {
+                "status": "ignored",
+                "required": [],
+                "events": [],
+                "restoration": {"status": "not-needed"},
+            }
+        manifest["browser_role"] = browser_role_manifest
 
         show_taps: ShowTapsController | None = None
         show_taps_manifest: dict[str, Any]
@@ -370,6 +431,7 @@ class CaptureRunner:
                                 theme=theme,
                                 navigation_mode=navigation_mode,
                                 navigation=navigation,
+                                browser_role=browser_role,
                                 show_taps=show_taps,
                                 dry_run=dry_run,
                                 verbose=verbose,
@@ -393,6 +455,17 @@ class CaptureRunner:
                         "manual_command": navigation.manual_restore_guidance(),
                     }
                 navigation_manifest["events"] = navigation.events
+            if browser_role is not None:
+                try:
+                    browser_role_manifest["restoration"] = browser_role.restore()
+                except Exception as error:
+                    restoration_error = restoration_error or error
+                    browser_role_manifest["restoration"] = {
+                        "status": "failed",
+                        "error": redact_error(error, device.serial),
+                        "manual_command": browser_role.manual_restore_guidance(),
+                    }
+                browser_role_manifest["events"] = browser_role.events
             if show_taps is not None:
                 try:
                     show_taps_manifest["restoration"] = show_taps.restore()
@@ -441,6 +514,7 @@ class CaptureRunner:
         theme: str,
         navigation_mode: NavigationMode | None,
         navigation: NavigationController | None,
+        browser_role: BrowserRoleController | None,
         show_taps: ShowTapsController | None,
         dry_run: bool,
         verbose: bool,
@@ -474,6 +548,17 @@ class CaptureRunner:
                     variant["effective_navigation"] = navigation_mode
                 else:
                     raise PrerequisiteError("Android navigation control was not initialized")
+            if capture.browser_role_holder is not None:
+                if browser_role is not None:
+                    variant["browser_role_event"] = browser_role.ensure(capture.browser_role_holder)
+                elif dry_run:
+                    variant["browser_role_event"] = {
+                        "action": "set",
+                        "holder": capture.browser_role_holder,
+                        "status": "planned",
+                    }
+                else:
+                    raise PrerequisiteError("Android browser role control was not initialized")
             recording = is_video_capture(capture)
             if recording and dry_run:
                 variant["effective_show_taps"] = capture.show_taps

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "android-automated-screengrabs"
-version = "0.7.0"
+version = "0.8.0"
 description = "Deterministic Android capture-to-publish pipelines"
 readme = "README.md"
 requires-python = ">=3.12"

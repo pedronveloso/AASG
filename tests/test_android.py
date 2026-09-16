@@ -9,6 +9,8 @@ import pytest
 
 from aasg import android
 from aasg.android import (
+    BrowserRoleController,
+    BrowserRoleState,
     CommandResult,
     Device,
     NavigationController,
@@ -16,11 +18,13 @@ from aasg.android import (
     ShowTapsController,
     ShowTapsState,
     active_user,
+    browser_role_update_command,
     discover_devices,
     gradle_command,
     instrumentation_command,
     instrumentation_succeeded,
     navigation_switch_command,
+    parse_browser_role_holders,
     parse_navigation_state,
     parse_show_taps_state,
     require_active_navigation,
@@ -180,6 +184,52 @@ def test_reads_show_taps_for_active_user(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_rejects_invalid_show_taps_state() -> None:
     with pytest.raises(PrerequisiteError, match="invalid Show taps value"):
         parse_show_taps_state("enabled")
+
+
+def test_parses_browser_role_holders_and_builds_commands() -> None:
+    assert parse_browser_role_holders("com.browser\n") == BrowserRoleState(("com.browser",))
+    assert browser_role_update_command("adb", "ABC", 10, "add-role-holder", "app.altsea")[-1] == (
+        "cmd role add-role-holder --user 10 android.app.role.BROWSER app.altsea"
+    )
+    with pytest.raises(PrerequisiteError, match="invalid browser role holder"):
+        parse_browser_role_holders("not a package\n")
+
+
+def test_browser_role_controller_restores_original_holders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    states = iter(
+        [
+            BrowserRoleState(("com.browser",)),
+            BrowserRoleState(("app.altsea",)),
+            BrowserRoleState(("app.altsea",)),
+            BrowserRoleState(("com.browser",)),
+        ]
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(android, "browser_role_state", lambda *args: next(states))
+    monkeypatch.setattr(
+        android,
+        "run_supervised",
+        lambda command, **kwargs: commands.append(list(command)) or CommandResult(0, 0.1),
+    )
+    controller = BrowserRoleController(
+        adb="adb",
+        serial="ABC",
+        user=10,
+        cwd=tmp_path,
+        log_path=tmp_path / "browser-role.log",
+        original_state=BrowserRoleState(("com.browser",)),
+    )
+
+    assert controller.ensure("app.altsea")["status"] == "succeeded"
+    assert controller.restore()["status"] == "succeeded"
+    assert [command[-1] for command in commands] == [
+        "cmd role remove-role-holder --user 10 android.app.role.BROWSER com.browser",
+        "cmd role add-role-holder --user 10 android.app.role.BROWSER app.altsea",
+        "cmd role remove-role-holder --user 10 android.app.role.BROWSER app.altsea",
+        "cmd role add-role-holder --user 10 android.app.role.BROWSER com.browser",
+    ]
 
 
 def test_show_taps_controller_enables_and_restores_unset_value(

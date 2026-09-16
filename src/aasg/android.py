@@ -67,6 +67,11 @@ class ShowTapsState:
         return bool(self.value) if self.present else False
 
 
+@dataclass(frozen=True)
+class BrowserRoleState:
+    holders: tuple[str, ...]
+
+
 def redact_serial(serial: str) -> str:
     return f"…{serial[-4:]}" if len(serial) > 4 else "…"
 
@@ -222,6 +227,38 @@ def show_taps_update_command(adb: str, serial: str, user: int, value: bool | Non
     if value is not None:
         operation = ["put", "system", "show_touches", "1" if value else "0"]
     return adb_shell_command(adb, serial, ["settings", "--user", str(user), *operation])
+
+
+def parse_browser_role_holders(output: str) -> BrowserRoleState:
+    holders = tuple(line.strip() for line in output.splitlines() if line.strip())
+    package_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
+    if any(not re.fullmatch(package_pattern, item) for item in holders):
+        raise PrerequisiteError("Android returned an invalid browser role holder")
+    return BrowserRoleState(holders)
+
+
+def browser_role_state(adb: str, serial: str, user: int) -> BrowserRoleState:
+    output = _run_text(
+        adb_shell_command(
+            adb,
+            serial,
+            ["cmd", "role", "get-role-holders", "--user", str(user), "android.app.role.BROWSER"],
+        ),
+        serial=serial,
+    )
+    return parse_browser_role_holders(output)
+
+
+def browser_role_update_command(
+    adb: str, serial: str, user: int, operation: str, package: str
+) -> list[str]:
+    if operation not in {"add-role-holder", "remove-role-holder"}:
+        raise ValueError("Unsupported browser role operation")
+    return adb_shell_command(
+        adb,
+        serial,
+        ["cmd", "role", operation, "--user", str(user), "android.app.role.BROWSER", package],
+    )
 
 
 def select_device(devices: list[Device], requested: str | None) -> Device:
@@ -628,6 +665,88 @@ class ShowTapsController:
                 self.user,
                 self.original_state.value,
             )
+        )
+
+
+class BrowserRoleController:
+    """Temporarily manages only the Android browser role for deterministic VIEW routing."""
+
+    def __init__(
+        self, *, adb: str, serial: str, user: int, cwd: Path, log_path: Path,
+        original_state: BrowserRoleState, verbose: bool = False,
+    ) -> None:
+        self.adb = adb
+        self.serial = serial
+        self.user = user
+        self.cwd = cwd
+        self.log_path = log_path
+        self.original_state = original_state
+        self.current_state = original_state
+        self.verbose = verbose
+        self.events: list[dict[str, object]] = []
+
+    @classmethod
+    def inspect(cls, *, adb: str, serial: str, user: int, cwd: Path, log_path: Path,
+                verbose: bool = False) -> BrowserRoleController:
+        return cls(adb=adb, serial=serial, user=user, cwd=cwd, log_path=log_path,
+                   original_state=browser_role_state(adb, serial, user), verbose=verbose)
+
+    def _change(self, operation: str, package: str) -> None:
+        command = browser_role_update_command(self.adb, self.serial, self.user, operation, package)
+        result = run_supervised(command, cwd=self.cwd, timeout_seconds=10, log_path=self.log_path,
+                                serial=self.serial, on_line=print if self.verbose else None,
+                                append=self.log_path.exists())
+        if result.returncode:
+            raise PrerequisiteError(
+                f"Android browser role {operation} returned {result.returncode}"
+            )
+
+    def ensure(self, holder: str) -> dict[str, object]:
+        observed = browser_role_state(self.adb, self.serial, self.user)
+        self.current_state = observed
+        if observed.holders == (holder,):
+            event: dict[str, object] = {"action": "set", "holder": holder, "status": "unchanged"}
+            self.events.append(event)
+            return event
+        event = {"action": "set", "holder": holder, "status": "failed"}
+        try:
+            for package in observed.holders:
+                self._change("remove-role-holder", package)
+            self._change("add-role-holder", holder)
+            verified = browser_role_state(self.adb, self.serial, self.user)
+            if verified.holders != (holder,):
+                raise PrerequisiteError("Could not set Android browser role holder")
+            self.current_state = verified
+            event["status"] = "succeeded"
+            self.events.append(event)
+            return event
+        except Exception as error:
+            event["error"] = redact_error(error, self.serial)
+            self.events.append(event)
+            raise
+
+    def restore(self) -> dict[str, object]:
+        observed = browser_role_state(self.adb, self.serial, self.user)
+        for package in observed.holders:
+            self._change("remove-role-holder", package)
+        for package in self.original_state.holders:
+            self._change("add-role-holder", package)
+        verified = browser_role_state(self.adb, self.serial, self.user)
+        if verified != self.original_state:
+            raise PrerequisiteError("Could not restore Android browser role holders")
+        self.current_state = verified
+        event: dict[str, object] = {
+            "action": "restore",
+            "holders": list(verified.holders),
+            "status": "succeeded",
+        }
+        self.events.append(event)
+        return event
+
+    def manual_restore_guidance(self) -> str:
+        return (
+            "Restore Android's Browser app in Settings; prior holders: "
+            + ", ".join(self.original_state.holders)
         )
 
 
