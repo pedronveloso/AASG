@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from aasg.android import (
-    BrowserRoleController,
     CommandResult,
+    DefaultsController,
     Device,
     NavigationController,
     ShowTapsController,
@@ -36,7 +36,7 @@ from aasg.artifacts import (
 from aasg.config import project_path, render_template, resolve_inside
 from aasg.errors import AasgError, CaptureError, ConfigurationError, ExitCode, PrerequisiteError
 from aasg.media import MediaProcessor, probe
-from aasg.models import AasgConfig, ArtifactConfig, CaptureConfig, NavigationMode
+from aasg.models import AasgConfig, ArtifactConfig, CaptureConfig, CaptureDefault, NavigationMode
 
 
 @dataclass(frozen=True)
@@ -154,12 +154,12 @@ def required_show_taps_values(config: AasgConfig, selection: Selection) -> set[b
     }
 
 
-def required_browser_role_holders(config: AasgConfig, selection: Selection) -> set[str]:
-    return {
-        holder
+def required_defaults(config: AasgConfig, selection: Selection) -> list[CaptureDefault]:
+    return [
+        default
         for capture_id in selection.captures
-        if (holder := config.captures[capture_id].browser_role_holder) is not None
-    }
+        for default in config.captures[capture_id].defaults
+    ]
 
 
 class CaptureRunner:
@@ -184,7 +184,7 @@ class CaptureRunner:
         run_root.mkdir(parents=True, exist_ok=True)
         additional_output = project_path(config_path, config.android.additional_output_dir)
         manifest: dict[str, Any] = {
-            "schema": 4,
+            "schema": 5,
             "run_id": run_id,
             "started_at": datetime.now(UTC).isoformat(),
             "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
@@ -207,9 +207,9 @@ class CaptureRunner:
         env = {"ANDROID_SERIAL": device.serial}
         required_modes = required_navigation_modes(config, selection)
         required_show_taps = required_show_taps_values(config, selection)
-        required_browser_roles = required_browser_role_holders(config, selection)
+        configured_defaults = required_defaults(config, selection)
         navigation: NavigationController | None = None
-        browser_role: BrowserRoleController | None = None
+        defaults: DefaultsController | None = None
         navigation_manifest: dict[str, Any]
         if required_modes and dry_run:
             navigation_manifest = {
@@ -254,6 +254,14 @@ class CaptureRunner:
                     "events": [],
                     "restoration": {"status": "not-needed"},
                 }
+                manifest["defaults"] = {
+                    "status": "not-started" if configured_defaults else "ignored",
+                    "defaults": [
+                        default.model_dump(mode="json") for default in configured_defaults
+                    ],
+                    "events": [],
+                    "restoration": {"status": "not-needed"},
+                }
                 manifest["completed_at"] = datetime.now(UTC).isoformat()
                 manifest["assets"] = []
                 manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
@@ -268,55 +276,52 @@ class CaptureRunner:
             }
         manifest["navigation"] = navigation_manifest
 
-        browser_role_manifest: dict[str, Any]
-        if required_browser_roles and dry_run:
-            browser_role_manifest = {
+        defaults_manifest: dict[str, Any]
+        if configured_defaults and dry_run:
+            defaults_manifest = {
                 "status": "planned",
-                "required": sorted(required_browser_roles),
+                "defaults": [default.model_dump(mode="json") for default in configured_defaults],
                 "events": [],
                 "restoration": {"status": "planned"},
             }
-        elif required_browser_roles:
+        elif configured_defaults:
             try:
                 user = active_user(config.android.adb, device.serial)
-                browser_role = BrowserRoleController.inspect(
+                defaults = DefaultsController(
                     adb=config.android.adb,
                     serial=device.serial,
                     user=user,
                     cwd=project_root,
-                    log_path=run_root / "commands" / "browser-role.log",
+                    log_path=run_root / "commands" / "defaults.log",
                     verbose=verbose,
                 )
-                browser_role_manifest = {
+                defaults.inspect(configured_defaults)
+                defaults_manifest = {
                     "status": "managed",
-                    "original": list(browser_role.original_state.holders),
-                    "required": sorted(required_browser_roles),
-                    "events": browser_role.events,
+                    "defaults": [
+                        default.model_dump(mode="json") for default in configured_defaults
+                    ],
+                    "events": defaults.events,
                     "restoration": {"status": "pending"},
                 }
             except Exception as error:
-                code = self._error_code(error)
-                browser_role_manifest = {
-                    "status": "failed",
-                    "required": sorted(required_browser_roles),
+                defaults_manifest = {
+                    "status": "warning",
+                    "defaults": [
+                        default.model_dump(mode="json") for default in configured_defaults
+                    ],
                     "error": redact_error(error, device.serial),
                     "events": [],
                     "restoration": {"status": "not-needed"},
                 }
-                manifest["browser_role"] = browser_role_manifest
-                manifest["completed_at"] = datetime.now(UTC).isoformat()
-                manifest["assets"] = []
-                manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
-                self._write_manifest(run_root, manifest)
-                return CaptureOutcome(run_root, 0, 1, code, manifest)
         else:
-            browser_role_manifest = {
+            defaults_manifest = {
                 "status": "ignored",
-                "required": [],
+                "defaults": [],
                 "events": [],
                 "restoration": {"status": "not-needed"},
             }
-        manifest["browser_role"] = browser_role_manifest
+        manifest["defaults"] = defaults_manifest
 
         show_taps: ShowTapsController | None = None
         show_taps_manifest: dict[str, Any]
@@ -431,7 +436,7 @@ class CaptureRunner:
                                 theme=theme,
                                 navigation_mode=navigation_mode,
                                 navigation=navigation,
-                                browser_role=browser_role,
+                                defaults=defaults,
                                 show_taps=show_taps,
                                 dry_run=dry_run,
                                 verbose=verbose,
@@ -455,17 +460,15 @@ class CaptureRunner:
                         "manual_command": navigation.manual_restore_guidance(),
                     }
                 navigation_manifest["events"] = navigation.events
-            if browser_role is not None:
-                try:
-                    browser_role_manifest["restoration"] = browser_role.restore()
-                except Exception as error:
-                    restoration_error = restoration_error or error
-                    browser_role_manifest["restoration"] = {
-                        "status": "failed",
-                        "error": redact_error(error, device.serial),
-                        "manual_command": browser_role.manual_restore_guidance(),
-                    }
-                browser_role_manifest["events"] = browser_role.events
+            if defaults is not None:
+                restore_events = defaults.restore()
+                defaults_manifest["restoration"] = {
+                    "status": "warning"
+                    if any(event["status"] == "warning" for event in restore_events)
+                    else "succeeded",
+                    "events": restore_events,
+                }
+                defaults_manifest["events"] = defaults.events
             if show_taps is not None:
                 try:
                     show_taps_manifest["restoration"] = show_taps.restore()
@@ -514,7 +517,7 @@ class CaptureRunner:
         theme: str,
         navigation_mode: NavigationMode | None,
         navigation: NavigationController | None,
-        browser_role: BrowserRoleController | None,
+        defaults: DefaultsController | None,
         show_taps: ShowTapsController | None,
         dry_run: bool,
         verbose: bool,
@@ -530,6 +533,7 @@ class CaptureRunner:
             "effective_navigation": navigation.current_mode if navigation is not None else None,
             "show_taps": capture.show_taps if is_video_capture(capture) else None,
             "effective_show_taps": None,
+            "default_events": [],
             "status": "failed",
             "artifacts": [],
         }
@@ -548,17 +552,20 @@ class CaptureRunner:
                     variant["effective_navigation"] = navigation_mode
                 else:
                     raise PrerequisiteError("Android navigation control was not initialized")
-            if capture.browser_role_holder is not None:
-                if browser_role is not None:
-                    variant["browser_role_event"] = browser_role.ensure(capture.browser_role_holder)
+            if capture.defaults:
+                if defaults is not None:
+                    variant["default_events"] = [
+                        defaults.ensure(action) for action in capture.defaults
+                    ]
                 elif dry_run:
-                    variant["browser_role_event"] = {
-                        "action": "set",
-                        "holder": capture.browser_role_holder,
-                        "status": "planned",
-                    }
-                else:
-                    raise PrerequisiteError("Android browser role control was not initialized")
+                    variant["default_events"] = [
+                        {
+                            "action": "ensure",
+                            "default": action.model_dump(mode="json"),
+                            "status": "planned",
+                        }
+                        for action in capture.defaults
+                    ]
             recording = is_video_capture(capture)
             if recording and dry_run:
                 variant["effective_show_taps"] = capture.show_taps

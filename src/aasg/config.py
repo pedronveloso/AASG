@@ -106,7 +106,7 @@ def project_path(config_path: Path, value: str) -> Path:
 
 
 STARTER_CONFIG = """# AASG configuration. Paths are relative to this file.
-schema: 6
+schema: 7
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -137,8 +137,11 @@ captures:
     label: Home
     test: com.example.HomeScreenshotCaptureTest
     navigation: ignore
-    # Optional: route HTTP(S) intents to this package and restore the prior browser role.
-    # browser_role_holder: com.example.app
+    # Optional Android defaults are applied before each variant and restored after the run.
+    # defaults:
+    #   - type: role
+    #     role: android.app.role.BROWSER
+    #     holders: [com.example.app]
     arguments: {screenshot: home, notAnnotation: ""}
     artifacts:
       - id: home

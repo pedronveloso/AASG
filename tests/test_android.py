@@ -9,23 +9,24 @@ import pytest
 
 from aasg import android
 from aasg.android import (
-    BrowserRoleController,
-    BrowserRoleState,
     CommandResult,
+    DefaultsController,
     Device,
     NavigationController,
     NavigationState,
+    RoleState,
     ShowTapsController,
     ShowTapsState,
     active_user,
-    browser_role_update_command,
     discover_devices,
     gradle_command,
     instrumentation_command,
     instrumentation_succeeded,
     navigation_switch_command,
-    parse_browser_role_holders,
     parse_navigation_state,
+    parse_permission_state,
+    parse_role_holders,
+    parse_setting_state,
     parse_show_taps_state,
     require_active_navigation,
     run_supervised,
@@ -34,7 +35,14 @@ from aasg.android import (
     show_taps_update_command,
 )
 from aasg.errors import CaptureError, PrerequisiteError
-from aasg.models import AndroidConfig, CaptureConfig, DirectInstrumentationConfig
+from aasg.models import (
+    AndroidConfig,
+    CaptureConfig,
+    DirectInstrumentationConfig,
+    PermissionDefault,
+    RoleDefault,
+    SettingDefault,
+)
 
 
 def test_android_testkit_wrapper_resolves_java_from_path(tmp_path: Path) -> None:
@@ -186,50 +194,111 @@ def test_rejects_invalid_show_taps_state() -> None:
         parse_show_taps_state("enabled")
 
 
-def test_parses_browser_role_holders_and_builds_commands() -> None:
-    assert parse_browser_role_holders("com.browser\n") == BrowserRoleState(("com.browser",))
-    assert browser_role_update_command("adb", "ABC", 10, "add-role-holder", "app.altsea")[-1] == (
-        "cmd role add-role-holder --user 10 android.app.role.BROWSER app.altsea"
+def test_parses_default_states_and_builds_role_commands() -> None:
+    assert parse_role_holders("com.browser\n") == RoleState(("com.browser",))
+    assert parse_permission_state("granted\n").granted is True
+    assert parse_permission_state("denied\n").granted is False
+    assert parse_setting_state("null\n").present is False
+    assert parse_setting_state("1.0\n").value == "1.0"
+    assert (
+        android.role_update_command(
+            "adb", "ABC", 10, "add-role-holder", "android.app.role.BROWSER", "app.altsea"
+        )[-1]
+        == "cmd role add-role-holder --user 10 android.app.role.BROWSER app.altsea"
     )
     with pytest.raises(PrerequisiteError, match="invalid browser role holder"):
-        parse_browser_role_holders("not a package\n")
+        parse_role_holders("not a package\n")
 
 
-def test_browser_role_controller_restores_original_holders(
+def test_defaults_controller_applies_and_restores_in_reverse_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    states = iter(
-        [
-            BrowserRoleState(("com.browser",)),
-            BrowserRoleState(("app.altsea",)),
-            BrowserRoleState(("app.altsea",)),
-            BrowserRoleState(("com.browser",)),
-        ]
-    )
+    states: dict[str, object] = {
+        "permission": android.PermissionState(False),
+        "role": RoleState(("com.browser",)),
+        "setting": android.SettingState(False, None),
+    }
     commands: list[list[str]] = []
-    monkeypatch.setattr(android, "browser_role_state", lambda *args: next(states))
+
+    monkeypatch.setattr(android, "permission_state", lambda *args: states["permission"])
+    monkeypatch.setattr(android, "role_state", lambda *args: states["role"])
+    monkeypatch.setattr(android, "setting_state", lambda *args: states["setting"])
+
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
+        commands.append(list(command))
+        shell = command[-1]
+        if "pm grant" in shell:
+            states["permission"] = android.PermissionState(True)
+        elif "pm revoke" in shell:
+            states["permission"] = android.PermissionState(False)
+        elif "remove-role-holder" in shell:
+            states["role"] = RoleState(())
+        elif "add-role-holder" in shell:
+            states["role"] = RoleState((shell.rsplit(" ", 1)[-1],))
+        elif "put global font_scale 1.0" in shell:
+            states["setting"] = android.SettingState(True, "1.0")
+        elif "delete global font_scale" in shell:
+            states["setting"] = android.SettingState(False, None)
+        return CommandResult(0, 0.1)
+
     monkeypatch.setattr(
         android,
         "run_supervised",
-        lambda command, **kwargs: commands.append(list(command)) or CommandResult(0, 0.1),
+        run,
     )
-    controller = BrowserRoleController(
+    controller = DefaultsController(
         adb="adb",
         serial="ABC",
         user=10,
         cwd=tmp_path,
-        log_path=tmp_path / "browser-role.log",
-        original_state=BrowserRoleState(("com.browser",)),
+        log_path=tmp_path / "defaults.log",
     )
-
-    assert controller.ensure("app.altsea")["status"] == "succeeded"
-    assert controller.restore()["status"] == "succeeded"
-    assert [command[-1] for command in commands] == [
-        "cmd role remove-role-holder --user 10 android.app.role.BROWSER com.browser",
-        "cmd role add-role-holder --user 10 android.app.role.BROWSER app.altsea",
-        "cmd role remove-role-holder --user 10 android.app.role.BROWSER app.altsea",
-        "cmd role add-role-holder --user 10 android.app.role.BROWSER com.browser",
+    actions = [
+        PermissionDefault(
+            type="permission",
+            package="com.example.app",
+            permission="android.permission.CAMERA",
+            state="granted",
+        ),
+        RoleDefault(type="role", role="android.app.role.BROWSER", holders=["app.altsea"]),
+        SettingDefault(type="setting", namespace="global", key="font_scale", value="1.0"),
     ]
+
+    controller.inspect(actions)
+    assert [controller.ensure(action)["status"] for action in actions] == ["succeeded"] * 3
+    assert [event["status"] for event in controller.restore()] == ["succeeded"] * 3
+    assert states == {
+        "permission": android.PermissionState(False),
+        "role": RoleState(("com.browser",)),
+        "setting": android.SettingState(False, None),
+    }
+    assert "delete global font_scale" in commands[-4][-1]
+
+
+def test_defaults_controller_retries_after_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = android.SettingState(False, None)
+    attempts = 0
+    monkeypatch.setattr(android, "setting_state", lambda *args: state)
+
+    def run(command, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal attempts, state
+        attempts += 1
+        if attempts == 1:
+            return CommandResult(1, 0.1)
+        state = android.SettingState(True, "1.0")
+        return CommandResult(0, 0.1)
+
+    monkeypatch.setattr(android, "run_supervised", run)
+    controller = DefaultsController(
+        adb="adb", serial="ABC", user=10, cwd=tmp_path, log_path=tmp_path / "defaults.log"
+    )
+    action = SettingDefault(type="setting", namespace="global", key="font_scale", value="1.0")
+    controller.inspect([action])
+
+    assert controller.ensure(action)["status"] == "warning"
+    assert controller.ensure(action)["status"] == "succeeded"
 
 
 def test_show_taps_controller_enables_and_restores_unset_value(

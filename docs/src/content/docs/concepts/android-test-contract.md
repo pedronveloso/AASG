@@ -30,7 +30,10 @@ undeclared or stale output rather than guessing which file belongs to a capture.
 
 For captures that request it, AASG temporarily switches Android navigation between
 gestural and three-button modes. For video captures it can also control Android's
-**Show taps** setting. It restores each changed setting even after an interrupted run.
+**Show taps** setting. Capture defaults can also declaratively set runtime permissions,
+Android roles, and named Android settings before each variant. AASG restores managed
+state after the run; defaults that cannot be applied or restored are reported as run
+warnings rather than changing the capture result.
 
 Choose `show_taps: false` when a video pipeline uses `gesture_overlay`; otherwise both
 native Android circles and rendered gesture cues would appear.

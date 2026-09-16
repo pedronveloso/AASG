@@ -79,6 +79,65 @@ NavigationMode = Literal["gestural", "three-button"]
 NavigationPolicy = Literal["gestural", "three-button", "all", "ignore"]
 
 
+class PermissionDefault(StrictModel):
+    type: Literal["permission"]
+    package: str
+    permission: str
+    state: Literal["granted", "revoked"]
+
+    @model_validator(mode="after")
+    def safe_identifiers(self) -> PermissionDefault:
+        package_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
+        permission_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
+        if not re.fullmatch(package_pattern, self.package):
+            raise ValueError("permission default package must be an Android package name")
+        if not re.fullmatch(permission_pattern, self.permission):
+            raise ValueError(
+                "permission default permission must be a dotted Android permission name"
+            )
+        return self
+
+
+class RoleDefault(StrictModel):
+    type: Literal["role"]
+    role: str
+    holders: list[str]
+
+    @model_validator(mode="after")
+    def safe_identifiers(self) -> RoleDefault:
+        package_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
+        if not re.fullmatch(package_pattern, self.role):
+            raise ValueError("role default role must be a dotted Android role name")
+        if len(set(self.holders)) != len(self.holders):
+            raise ValueError("role default holders must not contain duplicates")
+        if any(not re.fullmatch(package_pattern, holder) for holder in self.holders):
+            raise ValueError("role default holders must be Android package names")
+        return self
+
+
+class SettingDefault(StrictModel):
+    type: Literal["setting"]
+    namespace: Literal["system", "secure", "global"]
+    key: str
+    value: str | None
+
+    @model_validator(mode="after")
+    def safe_key(self) -> SettingDefault:
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", self.key):
+            raise ValueError(
+                "setting default key must contain only letters, digits, '.', '_' or '-'"
+            )
+        if self.namespace == "system" and self.key == "show_touches":
+            raise ValueError("system.show_touches is reserved for the show_taps capture control")
+        return self
+
+
+CaptureDefault = Annotated[
+    PermissionDefault | RoleDefault | SettingDefault,
+    Field(discriminator="type"),
+]
+
+
 class CaptureConfig(StrictModel):
     label: str
     test: str
@@ -87,7 +146,7 @@ class CaptureConfig(StrictModel):
     locales: list[str] | None = None
     themes: list[str] | None = None
     navigation: NavigationPolicy = "ignore"
-    browser_role_holder: str | None = None
+    defaults: list[CaptureDefault] = Field(default_factory=list)
     show_taps: bool = True
     artifacts: list[ArtifactConfig]
 
@@ -98,14 +157,6 @@ class CaptureConfig(StrictModel):
             raise ValueError(
                 "captures with video artifacts may include JSON artifacts, but not image artifacts"
             )
-        return self
-
-    @model_validator(mode="after")
-    def safe_browser_role_holder(self) -> CaptureConfig:
-        if self.browser_role_holder is not None and not re.fullmatch(
-            r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", self.browser_role_holder
-        ):
-            raise ValueError("browser_role_holder must be an Android package name")
         return self
 
 
@@ -262,7 +313,7 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
-CONFIG_SCHEMA_VERSION = 6
+CONFIG_SCHEMA_VERSION = 7
 
 
 def _has_template_field(template: str, field: str) -> bool:
@@ -270,7 +321,7 @@ def _has_template_field(template: str, field: str) -> bool:
 
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[6] = Field(alias="schema")
+    schema_version: Literal[7] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig

@@ -15,7 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aasg.errors import CaptureError, PrerequisiteError
-from aasg.models import AndroidConfig, CaptureConfig, NavigationMode
+from aasg.models import (
+    AndroidConfig,
+    CaptureConfig,
+    CaptureDefault,
+    NavigationMode,
+    PermissionDefault,
+    RoleDefault,
+    SettingDefault,
+)
 
 SECRET_PATTERN = re.compile(r"(?i)(password|token|secret|api[_-]?key)=([^\s]+)")
 NAVIGATION_OVERLAYS: dict[NavigationMode, str] = {
@@ -68,8 +76,19 @@ class ShowTapsState:
 
 
 @dataclass(frozen=True)
-class BrowserRoleState:
+class RoleState:
     holders: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PermissionState:
+    granted: bool
+
+
+@dataclass(frozen=True)
+class SettingState:
+    present: bool
+    value: str | None
 
 
 def redact_serial(serial: str) -> str:
@@ -229,36 +248,92 @@ def show_taps_update_command(adb: str, serial: str, user: int, value: bool | Non
     return adb_shell_command(adb, serial, ["settings", "--user", str(user), *operation])
 
 
-def parse_browser_role_holders(output: str) -> BrowserRoleState:
+def parse_role_holders(output: str) -> RoleState:
     holders = tuple(line.strip() for line in output.splitlines() if line.strip())
     package_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
     if any(not re.fullmatch(package_pattern, item) for item in holders):
         raise PrerequisiteError("Android returned an invalid browser role holder")
-    return BrowserRoleState(holders)
+    return RoleState(holders)
 
 
-def browser_role_state(adb: str, serial: str, user: int) -> BrowserRoleState:
+def role_state(adb: str, serial: str, user: int, role: str) -> RoleState:
     output = _run_text(
         adb_shell_command(
-            adb,
-            serial,
-            ["cmd", "role", "get-role-holders", "--user", str(user), "android.app.role.BROWSER"],
+            adb, serial, ["cmd", "role", "get-role-holders", "--user", str(user), role]
         ),
         serial=serial,
     )
-    return parse_browser_role_holders(output)
+    return parse_role_holders(output)
 
 
-def browser_role_update_command(
-    adb: str, serial: str, user: int, operation: str, package: str
+def role_update_command(
+    adb: str, serial: str, user: int, operation: str, role: str, package: str
 ) -> list[str]:
     if operation not in {"add-role-holder", "remove-role-holder"}:
-        raise ValueError("Unsupported browser role operation")
+        raise ValueError("Unsupported Android role operation")
     return adb_shell_command(
         adb,
         serial,
-        ["cmd", "role", operation, "--user", str(user), "android.app.role.BROWSER", package],
+        ["cmd", "role", operation, "--user", str(user), role, package],
     )
+
+
+def parse_permission_state(output: str) -> PermissionState:
+    value = output.strip().replace("\r", "").lower()
+    result = value.rsplit(maxsplit=1)[-1] if value else ""
+    if result == "granted":
+        return PermissionState(True)
+    if result == "denied":
+        return PermissionState(False)
+    raise PrerequisiteError(f"Android returned an invalid permission state: {value!r}")
+
+
+def permission_state(
+    adb: str, serial: str, user: int, package: str, permission: str
+) -> PermissionState:
+    return parse_permission_state(
+        _run_text(
+            adb_shell_command(
+                adb,
+                serial,
+                ["cmd", "package", "check-permission", permission, str(user), package],
+            ),
+            serial=serial,
+        )
+    )
+
+
+def permission_update_command(
+    adb: str, serial: str, user: int, package: str, permission: str, granted: bool
+) -> list[str]:
+    return adb_shell_command(
+        adb,
+        serial,
+        ["pm", "grant" if granted else "revoke", "--user", str(user), package, permission],
+    )
+
+
+def parse_setting_state(output: str) -> SettingState:
+    value = output.replace("\r\n", "\n").removesuffix("\n")
+    return SettingState(False, None) if value == "null" else SettingState(True, value)
+
+
+def setting_state(adb: str, serial: str, user: int, namespace: str, key: str) -> SettingState:
+    return parse_setting_state(
+        _run_text(
+            adb_shell_command(
+                adb, serial, ["settings", "--user", str(user), "get", namespace, key]
+            ),
+            serial=serial,
+        )
+    )
+
+
+def setting_update_command(
+    adb: str, serial: str, user: int, namespace: str, key: str, value: str | None
+) -> list[str]:
+    operation = ["delete", namespace, key] if value is None else ["put", namespace, key, value]
+    return adb_shell_command(adb, serial, ["settings", "--user", str(user), *operation])
 
 
 def select_device(devices: list[Device], requested: str | None) -> Device:
@@ -668,86 +743,174 @@ class ShowTapsController:
         )
 
 
-class BrowserRoleController:
-    """Temporarily manages only the Android browser role for deterministic VIEW routing."""
+class DefaultsController:
+    """Best-effort, declarative Android defaults with exact state restoration."""
 
     def __init__(
-        self, *, adb: str, serial: str, user: int, cwd: Path, log_path: Path,
-        original_state: BrowserRoleState, verbose: bool = False,
+        self, *, adb: str, serial: str, user: int, cwd: Path, log_path: Path, verbose: bool = False
     ) -> None:
         self.adb = adb
         self.serial = serial
         self.user = user
         self.cwd = cwd
         self.log_path = log_path
-        self.original_state = original_state
-        self.current_state = original_state
         self.verbose = verbose
+        self.original: dict[str, object] = {}
+        self.actions: dict[str, CaptureDefault] = {}
+        self.target_order: list[str] = []
         self.events: list[dict[str, object]] = []
 
-    @classmethod
-    def inspect(cls, *, adb: str, serial: str, user: int, cwd: Path, log_path: Path,
-                verbose: bool = False) -> BrowserRoleController:
-        return cls(adb=adb, serial=serial, user=user, cwd=cwd, log_path=log_path,
-                   original_state=browser_role_state(adb, serial, user), verbose=verbose)
+    def _target(self, action: CaptureDefault) -> str:
+        if isinstance(action, PermissionDefault):
+            return f"permission:{action.package}:{action.permission}"
+        if isinstance(action, RoleDefault):
+            return f"role:{action.role}"
+        return f"setting:{action.namespace}:{action.key}"
 
-    def _change(self, operation: str, package: str) -> None:
-        command = browser_role_update_command(self.adb, self.serial, self.user, operation, package)
-        result = run_supervised(command, cwd=self.cwd, timeout_seconds=10, log_path=self.log_path,
-                                serial=self.serial, on_line=print if self.verbose else None,
-                                append=self.log_path.exists())
-        if result.returncode:
-            raise PrerequisiteError(
-                f"Android browser role {operation} returned {result.returncode}"
+    def _read(self, action: CaptureDefault) -> object:
+        if isinstance(action, PermissionDefault):
+            return permission_state(
+                self.adb, self.serial, self.user, action.package, action.permission
             )
+        if isinstance(action, RoleDefault):
+            return role_state(self.adb, self.serial, self.user, action.role)
+        return setting_state(self.adb, self.serial, self.user, action.namespace, action.key)
 
-    def ensure(self, holder: str) -> dict[str, object]:
-        observed = browser_role_state(self.adb, self.serial, self.user)
-        self.current_state = observed
-        if observed.holders == (holder,):
-            event: dict[str, object] = {"action": "set", "holder": holder, "status": "unchanged"}
-            self.events.append(event)
-            return event
-        event = {"action": "set", "holder": holder, "status": "failed"}
+    def _desired(self, action: CaptureDefault) -> object:
+        if isinstance(action, PermissionDefault):
+            return PermissionState(action.state == "granted")
+        if isinstance(action, RoleDefault):
+            return RoleState(tuple(action.holders))
+        return SettingState(action.value is not None, action.value)
+
+    def _commands_to_set(self, action: CaptureDefault, state: object) -> list[list[str]]:
+        if isinstance(action, PermissionDefault):
+            assert isinstance(state, PermissionState)
+            return [
+                permission_update_command(
+                    self.adb,
+                    self.serial,
+                    self.user,
+                    action.package,
+                    action.permission,
+                    state.granted,
+                )
+            ]
+        if isinstance(action, RoleDefault):
+            assert isinstance(state, RoleState)
+            observed = self._read(action)
+            assert isinstance(observed, RoleState)
+            commands = [
+                role_update_command(
+                    self.adb, self.serial, self.user, "remove-role-holder", action.role, holder
+                )
+                for holder in observed.holders
+            ]
+            commands.extend(
+                role_update_command(
+                    self.adb, self.serial, self.user, "add-role-holder", action.role, holder
+                )
+                for holder in state.holders
+            )
+            return commands
+        assert isinstance(action, SettingDefault)
+        assert isinstance(state, SettingState)
+        return [
+            setting_update_command(
+                self.adb, self.serial, self.user, action.namespace, action.key, state.value
+            )
+        ]
+
+    def _run_commands(self, commands: list[list[str]]) -> None:
+        for command in commands:
+            result = run_supervised(
+                command,
+                cwd=self.cwd,
+                timeout_seconds=10,
+                log_path=self.log_path,
+                serial=self.serial,
+                on_line=print if self.verbose else None,
+                append=self.log_path.exists(),
+            )
+            if result.returncode:
+                raise PrerequisiteError(f"Android default update returned {result.returncode}")
+
+    def _event(self, action: CaptureDefault, operation: str) -> dict[str, object]:
+        return {"action": operation, "default": action.model_dump(mode="json"), "status": "warning"}
+
+    def inspect(self, actions: list[CaptureDefault]) -> None:
+        for action in actions:
+            target = self._target(action)
+            if target in self.actions:
+                continue
+            self.actions[target] = action
+            self.target_order.append(target)
+            try:
+                self.original[target] = self._read(action)
+            except Exception as error:
+                event = self._event(action, "inspect")
+                event["error"] = redact_error(error, self.serial)
+                self.events.append(event)
+
+    def ensure(self, action: CaptureDefault) -> dict[str, object]:
+        target = self._target(action)
+        event: dict[str, object]
+        if target not in self.actions:
+            self.actions[target] = action
+            self.target_order.append(target)
+        if target not in self.original:
+            try:
+                self.original[target] = self._read(action)
+            except Exception as error:
+                event = self._event(action, "inspect")
+                event["error"] = redact_error(error, self.serial)
+                self.events.append(event)
+                return event
         try:
-            for package in observed.holders:
-                self._change("remove-role-holder", package)
-            self._change("add-role-holder", holder)
-            verified = browser_role_state(self.adb, self.serial, self.user)
-            if verified.holders != (holder,):
-                raise PrerequisiteError("Could not set Android browser role holder")
-            self.current_state = verified
-            event["status"] = "succeeded"
-            self.events.append(event)
-            return event
+            desired = self._desired(action)
+            observed = self._read(action)
+            if observed == desired:
+                event = {
+                    "action": "ensure",
+                    "default": action.model_dump(mode="json"),
+                    "status": "unchanged",
+                }
+            else:
+                self._run_commands(self._commands_to_set(action, desired))
+                if self._read(action) != desired:
+                    raise PrerequisiteError("Android default did not reach its requested state")
+                event = {
+                    "action": "ensure",
+                    "default": action.model_dump(mode="json"),
+                    "status": "succeeded",
+                }
         except Exception as error:
+            event = self._event(action, "ensure")
             event["error"] = redact_error(error, self.serial)
-            self.events.append(event)
-            raise
-
-    def restore(self) -> dict[str, object]:
-        observed = browser_role_state(self.adb, self.serial, self.user)
-        for package in observed.holders:
-            self._change("remove-role-holder", package)
-        for package in self.original_state.holders:
-            self._change("add-role-holder", package)
-        verified = browser_role_state(self.adb, self.serial, self.user)
-        if verified != self.original_state:
-            raise PrerequisiteError("Could not restore Android browser role holders")
-        self.current_state = verified
-        event: dict[str, object] = {
-            "action": "restore",
-            "holders": list(verified.holders),
-            "status": "succeeded",
-        }
         self.events.append(event)
         return event
 
-    def manual_restore_guidance(self) -> str:
-        return (
-            "Restore Android's Browser app in Settings; prior holders: "
-            + ", ".join(self.original_state.holders)
-        )
+    def restore(self) -> list[dict[str, object]]:
+        restoration: list[dict[str, object]] = []
+        for target in reversed(self.target_order):
+            if target not in self.original:
+                continue
+            action = self.actions[target]
+            try:
+                self._run_commands(self._commands_to_set(action, self.original[target]))
+                if self._read(action) != self.original[target]:
+                    raise PrerequisiteError("Android default did not restore its original state")
+                event: dict[str, object] = {
+                    "action": "restore",
+                    "default": action.model_dump(mode="json"),
+                    "status": "succeeded",
+                }
+            except Exception as error:
+                event = self._event(action, "restore")
+                event["error"] = redact_error(error, self.serial)
+            self.events.append(event)
+            restoration.append(event)
+        return restoration
 
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:
