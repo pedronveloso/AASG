@@ -22,6 +22,7 @@ from aasg.android import (
     gradle_command,
     instrumentation_command,
     instrumentation_succeeded,
+    manifest_default,
     redact_error,
     redact_serial,
     run_supervised,
@@ -256,9 +257,7 @@ class CaptureRunner:
                 }
                 manifest["defaults"] = {
                     "status": "not-started" if configured_defaults else "ignored",
-                    "defaults": [
-                        default.model_dump(mode="json") for default in configured_defaults
-                    ],
+                    "defaults": [manifest_default(default) for default in configured_defaults],
                     "events": [],
                     "restoration": {"status": "not-needed"},
                 }
@@ -280,7 +279,7 @@ class CaptureRunner:
         if configured_defaults and dry_run:
             defaults_manifest = {
                 "status": "planned",
-                "defaults": [default.model_dump(mode="json") for default in configured_defaults],
+                "defaults": [manifest_default(default) for default in configured_defaults],
                 "events": [],
                 "restoration": {"status": "planned"},
             }
@@ -298,18 +297,14 @@ class CaptureRunner:
                 defaults.inspect(configured_defaults)
                 defaults_manifest = {
                     "status": "managed",
-                    "defaults": [
-                        default.model_dump(mode="json") for default in configured_defaults
-                    ],
+                    "defaults": [manifest_default(default) for default in configured_defaults],
                     "events": defaults.events,
                     "restoration": {"status": "pending"},
                 }
             except Exception as error:
                 defaults_manifest = {
                     "status": "warning",
-                    "defaults": [
-                        default.model_dump(mode="json") for default in configured_defaults
-                    ],
+                    "defaults": [manifest_default(default) for default in configured_defaults],
                     "error": redact_error(error, device.serial),
                     "events": [],
                     "restoration": {"status": "not-needed"},
@@ -561,7 +556,7 @@ class CaptureRunner:
                     variant["default_events"] = [
                         {
                             "action": "ensure",
-                            "default": action.model_dump(mode="json"),
+                            "default": manifest_default(action),
                             "status": "planned",
                         }
                         for action in capture.defaults

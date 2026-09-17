@@ -25,10 +25,11 @@ strict, inspectable, and safe to rerun.
 
 ## A narrow, deliberate boundary
 
-Your app owns UI automation, fixtures, permissions, synchronization, locale/theme
+Your app owns UI automation, fixtures, app state, synchronization, locale/theme
 application, and the moment a capture is made. AASG owns the capture matrix,
 supervised execution, AndroidX Test Storage collection, semantic metadata, typed
-media recipes, device-frame provenance, and stable final artifacts.
+media recipes, device-frame provenance, stable final artifacts, and explicitly
+configured Android prerequisites.
 
 It does not replace Compose testing, UI Automator, Gradle, ADB, or FFmpeg.
 

@@ -16,9 +16,11 @@ that output into stable screenshots and video renditions.
 
 ## Keep these responsibilities in the app
 
-The instrumentation test remains responsible for navigation, fixtures, permissions,
+The instrumentation test remains responsible for navigation, fixtures, app state,
 UI synchronization, locale/theme selection, and writing media at the appropriate
-moment. AASG intentionally does not introduce another UI automation engine.
+moment. AASG intentionally does not introduce another UI automation engine. A capture
+may declare temporary Android prerequisites, including runtime permissions, when the
+same state must be applied and restored consistently across variants.
 
 ## What AASG guarantees
 

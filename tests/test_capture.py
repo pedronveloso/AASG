@@ -79,6 +79,9 @@ def test_dry_run_plans_capture_defaults(tmp_path: Path) -> None:
         "planned",
         "planned",
     ]
+    assert "value" not in outcome.manifest["defaults"]["defaults"][1]
+    assert "value" not in outcome.manifest["variants"][0]["default_events"][1]["default"]
+    assert "1.0" not in (outcome.run_root / "run.json").read_text()
 
 
 def test_default_initialization_warning_does_not_block_capture(

@@ -104,6 +104,20 @@ def redact_error(error: Exception, serial: str | None = None) -> str:
     return redact_line(str(error), serial)
 
 
+def manifest_default(action: CaptureDefault) -> dict[str, object]:
+    """Return a persisted description without arbitrary setting values."""
+    if isinstance(action, PermissionDefault):
+        return {
+            "type": action.type,
+            "package": action.package,
+            "permission": action.permission,
+            "state": action.state,
+        }
+    if isinstance(action, RoleDefault):
+        return {"type": action.type, "role": action.role, "holders": action.holders}
+    return {"type": action.type, "namespace": action.namespace, "key": action.key}
+
+
 def _run_text(command: Sequence[str], timeout: float = 10, *, serial: str | None = None) -> str:
     try:
         return subprocess.run(
@@ -252,7 +266,7 @@ def parse_role_holders(output: str) -> RoleState:
     holders = tuple(line.strip() for line in output.splitlines() if line.strip())
     package_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
     if any(not re.fullmatch(package_pattern, item) for item in holders):
-        raise PrerequisiteError("Android returned an invalid browser role holder")
+        raise PrerequisiteError("Android returned an invalid role holder")
     return RoleState(holders)
 
 
@@ -836,7 +850,7 @@ class DefaultsController:
                 raise PrerequisiteError(f"Android default update returned {result.returncode}")
 
     def _event(self, action: CaptureDefault, operation: str) -> dict[str, object]:
-        return {"action": operation, "default": action.model_dump(mode="json"), "status": "warning"}
+        return {"action": operation, "default": manifest_default(action), "status": "warning"}
 
     def inspect(self, actions: list[CaptureDefault]) -> None:
         for action in actions:
@@ -872,7 +886,7 @@ class DefaultsController:
             if observed == desired:
                 event = {
                     "action": "ensure",
-                    "default": action.model_dump(mode="json"),
+                    "default": manifest_default(action),
                     "status": "unchanged",
                 }
             else:
@@ -881,7 +895,7 @@ class DefaultsController:
                     raise PrerequisiteError("Android default did not reach its requested state")
                 event = {
                     "action": "ensure",
-                    "default": action.model_dump(mode="json"),
+                    "default": manifest_default(action),
                     "status": "succeeded",
                 }
         except Exception as error:
@@ -902,7 +916,7 @@ class DefaultsController:
                     raise PrerequisiteError("Android default did not restore its original state")
                 event: dict[str, object] = {
                     "action": "restore",
-                    "default": action.model_dump(mode="json"),
+                    "default": manifest_default(action),
                     "status": "succeeded",
                 }
             except Exception as error:

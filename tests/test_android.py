@@ -206,8 +206,20 @@ def test_parses_default_states_and_builds_role_commands() -> None:
         )[-1]
         == "cmd role add-role-holder --user 10 android.app.role.BROWSER app.altsea"
     )
-    with pytest.raises(PrerequisiteError, match="invalid browser role holder"):
+    with pytest.raises(PrerequisiteError, match="invalid role holder"):
         parse_role_holders("not a package\n")
+
+
+def test_manifest_default_omits_setting_value() -> None:
+    action = SettingDefault(
+        type="setting", namespace="global", key="api_token", value="super-secret"
+    )
+
+    assert android.manifest_default(action) == {
+        "type": "setting",
+        "namespace": "global",
+        "key": "api_token",
+    }
 
 
 def test_defaults_controller_applies_and_restores_in_reverse_order(
@@ -267,6 +279,7 @@ def test_defaults_controller_applies_and_restores_in_reverse_order(
     controller.inspect(actions)
     assert [controller.ensure(action)["status"] for action in actions] == ["succeeded"] * 3
     assert [event["status"] for event in controller.restore()] == ["succeeded"] * 3
+    assert "value" not in controller.events[2]["default"]
     assert states == {
         "permission": android.PermissionState(False),
         "role": RoleState(("com.browser",)),

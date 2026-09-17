@@ -104,7 +104,7 @@ user. AASG snapshots every successfully inspected target once, applies this capt
 actions before each variant, and restores targets in reverse order after the run.
 Warnings while inspecting, applying, or restoring a default are recorded in the run
 manifest and do not prevent capture publication; AASG retries application for later
-variants.
+variants. Setting values are never persisted in the run manifest or its events.
 
 | `type` | Required fields | Behavior |
 | --- | --- | --- |
