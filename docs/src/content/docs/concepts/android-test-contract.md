@@ -6,7 +6,7 @@ description: Keep app behavior inside instrumentation tests and hand off only me
 ## The app owns the journey
 
 An AASG capture is not a replacement for your test stack. Compose tests, Espresso, UI
-Automator, and your test fixtures continue to own navigation, permissions, state,
+Automator, and your test fixtures continue to own navigation and app state,
 synchronization, locale/theme behavior, and deciding precisely when a frame is ready.
 
 AASG sets up the requested capture variant, runs the configured test, and collects only
@@ -30,7 +30,11 @@ undeclared or stale output rather than guessing which file belongs to a capture.
 
 For captures that request it, AASG temporarily switches Android navigation between
 gestural and three-button modes. For video captures it can also control Android's
-**Show taps** setting. It restores each changed setting even after an interrupted run.
+**Show taps** setting. Capture defaults can also declare Android prerequisites before
+each variant: runtime permissions, roles, and named Android settings. This is a narrow
+exception to the app-owned state boundary: AASG only applies declared prerequisites and
+restores their original state after the run. Defaults that cannot be applied or restored
+are reported as run warnings rather than changing the capture result.
 
 Choose `show_taps: false` when a video pipeline uses `gesture_overlay`; otherwise both
 native Android circles and rendered gesture cues would appear.

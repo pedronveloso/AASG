@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from aasg.android import (
     CommandResult,
+    DefaultsController,
     Device,
     NavigationController,
     ShowTapsController,
@@ -21,6 +22,7 @@ from aasg.android import (
     gradle_command,
     instrumentation_command,
     instrumentation_succeeded,
+    manifest_default,
     redact_error,
     redact_serial,
     run_supervised,
@@ -35,7 +37,7 @@ from aasg.artifacts import (
 from aasg.config import project_path, render_template, resolve_inside
 from aasg.errors import AasgError, CaptureError, ConfigurationError, ExitCode, PrerequisiteError
 from aasg.media import MediaProcessor, probe
-from aasg.models import AasgConfig, ArtifactConfig, CaptureConfig, NavigationMode
+from aasg.models import AasgConfig, ArtifactConfig, CaptureConfig, CaptureDefault, NavigationMode
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,14 @@ def required_show_taps_values(config: AasgConfig, selection: Selection) -> set[b
     }
 
 
+def required_defaults(config: AasgConfig, selection: Selection) -> list[CaptureDefault]:
+    return [
+        default
+        for capture_id in selection.captures
+        for default in config.captures[capture_id].defaults
+    ]
+
+
 class CaptureRunner:
     def __init__(self, processor: MediaProcessor | None = None) -> None:
         self.processor = processor or MediaProcessor()
@@ -175,7 +185,7 @@ class CaptureRunner:
         run_root.mkdir(parents=True, exist_ok=True)
         additional_output = project_path(config_path, config.android.additional_output_dir)
         manifest: dict[str, Any] = {
-            "schema": 4,
+            "schema": 5,
             "run_id": run_id,
             "started_at": datetime.now(UTC).isoformat(),
             "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
@@ -198,7 +208,9 @@ class CaptureRunner:
         env = {"ANDROID_SERIAL": device.serial}
         required_modes = required_navigation_modes(config, selection)
         required_show_taps = required_show_taps_values(config, selection)
+        configured_defaults = required_defaults(config, selection)
         navigation: NavigationController | None = None
+        defaults: DefaultsController | None = None
         navigation_manifest: dict[str, Any]
         if required_modes and dry_run:
             navigation_manifest = {
@@ -243,6 +255,12 @@ class CaptureRunner:
                     "events": [],
                     "restoration": {"status": "not-needed"},
                 }
+                manifest["defaults"] = {
+                    "status": "not-started" if configured_defaults else "ignored",
+                    "defaults": [manifest_default(default) for default in configured_defaults],
+                    "events": [],
+                    "restoration": {"status": "not-needed"},
+                }
                 manifest["completed_at"] = datetime.now(UTC).isoformat()
                 manifest["assets"] = []
                 manifest["result"] = {"succeeded": 0, "failed": 1, "exit_code": code}
@@ -256,6 +274,49 @@ class CaptureRunner:
                 "restoration": {"status": "not-needed"},
             }
         manifest["navigation"] = navigation_manifest
+
+        defaults_manifest: dict[str, Any]
+        if configured_defaults and dry_run:
+            defaults_manifest = {
+                "status": "planned",
+                "defaults": [manifest_default(default) for default in configured_defaults],
+                "events": [],
+                "restoration": {"status": "planned"},
+            }
+        elif configured_defaults:
+            try:
+                user = active_user(config.android.adb, device.serial)
+                defaults = DefaultsController(
+                    adb=config.android.adb,
+                    serial=device.serial,
+                    user=user,
+                    cwd=project_root,
+                    log_path=run_root / "commands" / "defaults.log",
+                    verbose=verbose,
+                )
+                defaults.inspect(configured_defaults)
+                defaults_manifest = {
+                    "status": "managed",
+                    "defaults": [manifest_default(default) for default in configured_defaults],
+                    "events": defaults.events,
+                    "restoration": {"status": "pending"},
+                }
+            except Exception as error:
+                defaults_manifest = {
+                    "status": "warning",
+                    "defaults": [manifest_default(default) for default in configured_defaults],
+                    "error": redact_error(error, device.serial),
+                    "events": [],
+                    "restoration": {"status": "not-needed"},
+                }
+        else:
+            defaults_manifest = {
+                "status": "ignored",
+                "defaults": [],
+                "events": [],
+                "restoration": {"status": "not-needed"},
+            }
+        manifest["defaults"] = defaults_manifest
 
         show_taps: ShowTapsController | None = None
         show_taps_manifest: dict[str, Any]
@@ -370,6 +431,7 @@ class CaptureRunner:
                                 theme=theme,
                                 navigation_mode=navigation_mode,
                                 navigation=navigation,
+                                defaults=defaults,
                                 show_taps=show_taps,
                                 dry_run=dry_run,
                                 verbose=verbose,
@@ -393,6 +455,15 @@ class CaptureRunner:
                         "manual_command": navigation.manual_restore_guidance(),
                     }
                 navigation_manifest["events"] = navigation.events
+            if defaults is not None:
+                restore_events = defaults.restore()
+                defaults_manifest["restoration"] = {
+                    "status": "warning"
+                    if any(event["status"] == "warning" for event in restore_events)
+                    else "succeeded",
+                    "events": restore_events,
+                }
+                defaults_manifest["events"] = defaults.events
             if show_taps is not None:
                 try:
                     show_taps_manifest["restoration"] = show_taps.restore()
@@ -441,6 +512,7 @@ class CaptureRunner:
         theme: str,
         navigation_mode: NavigationMode | None,
         navigation: NavigationController | None,
+        defaults: DefaultsController | None,
         show_taps: ShowTapsController | None,
         dry_run: bool,
         verbose: bool,
@@ -456,6 +528,7 @@ class CaptureRunner:
             "effective_navigation": navigation.current_mode if navigation is not None else None,
             "show_taps": capture.show_taps if is_video_capture(capture) else None,
             "effective_show_taps": None,
+            "default_events": [],
             "status": "failed",
             "artifacts": [],
         }
@@ -474,6 +547,20 @@ class CaptureRunner:
                     variant["effective_navigation"] = navigation_mode
                 else:
                     raise PrerequisiteError("Android navigation control was not initialized")
+            if capture.defaults:
+                if defaults is not None:
+                    variant["default_events"] = [
+                        defaults.ensure(action) for action in capture.defaults
+                    ]
+                elif dry_run:
+                    variant["default_events"] = [
+                        {
+                            "action": "ensure",
+                            "default": manifest_default(action),
+                            "status": "planned",
+                        }
+                        for action in capture.defaults
+                    ]
             recording = is_video_capture(capture)
             if recording and dry_run:
                 variant["effective_show_taps"] = capture.show_taps

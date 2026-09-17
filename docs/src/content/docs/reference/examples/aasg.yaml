@@ -1,5 +1,5 @@
 # Paths are relative to this configuration file.
-schema: 5
+schema: 7
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -32,6 +32,10 @@ captures:
     label: Home screenshot
     test: com.example.HomeScreenshotCaptureTest
     navigation: all
+    defaults:
+      - type: role
+        role: android.app.role.BROWSER
+        holders: [com.example.app]
     arguments: {screenshot: home, notAnnotation: ""}
     artifacts:
       - id: home

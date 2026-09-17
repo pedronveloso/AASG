@@ -13,7 +13,7 @@ from aasg.errors import ConfigurationError
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 5
+    assert config.schema_version == 7
     assert config.captures["home"].test == "example.HomeCaptureTest"
     assert config.captures["home"].navigation == "ignore"
     assert config.captures["home"].show_taps is True
@@ -197,7 +197,7 @@ def test_all_navigation_accepts_literal_braces_with_navigation_field(tmp_path: P
     )
 
 
-@pytest.mark.parametrize("schema", [1, 2, 3, 4, 6])
+@pytest.mark.parametrize("schema", [1, 2, 3, 4, 5, 6])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int
 ) -> None:
@@ -205,8 +205,77 @@ def test_rejects_unsupported_config_schema_with_migration_guidance(
 
     with pytest.raises(
         ConfigurationError,
-        match=rf"Unsupported configuration schema {schema}.*requires schema 5.*migrate",
+        match=rf"Unsupported configuration schema {schema}.*requires schema 7.*migrate",
     ):
+        load_config(path)
+
+
+def test_validates_capture_defaults(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["defaults"] = [
+        {
+            "type": "permission",
+            "package": "com.example.app",
+            "permission": "android.permission.POST_NOTIFICATIONS",
+            "state": "granted",
+        },
+        {
+            "type": "role",
+            "role": "android.app.role.BROWSER",
+            "holders": ["com.example.app"],
+        },
+        {"type": "setting", "namespace": "global", "key": "font_scale", "value": "1.0"},
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert [default.type for default in load_config(path).captures["home"].defaults] == [
+        "permission",
+        "role",
+        "setting",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("default", "message"),
+    [
+        (
+            {
+                "type": "permission",
+                "package": "bad",
+                "permission": "android.permission.CAMERA",
+                "state": "granted",
+            },
+            "package",
+        ),
+        (
+            {
+                "type": "permission",
+                "package": "com.example.app",
+                "permission": "CAMERA",
+                "state": "granted",
+            },
+            "permission",
+        ),
+        ({"type": "role", "role": "bad", "holders": []}, "role"),
+        ({"type": "role", "role": "android.app.role.BROWSER", "holders": ["bad"]}, "holders"),
+        (
+            {"type": "setting", "namespace": "system", "key": "show_touches", "value": "1"},
+            "reserved",
+        ),
+        ({"type": "setting", "namespace": "system", "key": "not safe", "value": "1"}, "key"),
+        ({"type": "unknown"}, "type"),
+    ],
+)
+def test_rejects_invalid_capture_defaults(
+    tmp_path: Path, default: dict[str, object], message: str
+) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["defaults"] = [default]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match=message):
         load_config(path)
 
 

@@ -15,7 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aasg.errors import CaptureError, PrerequisiteError
-from aasg.models import AndroidConfig, CaptureConfig, NavigationMode
+from aasg.models import (
+    AndroidConfig,
+    CaptureConfig,
+    CaptureDefault,
+    NavigationMode,
+    PermissionDefault,
+    RoleDefault,
+    SettingDefault,
+)
 
 SECRET_PATTERN = re.compile(r"(?i)(password|token|secret|api[_-]?key)=([^\s]+)")
 NAVIGATION_OVERLAYS: dict[NavigationMode, str] = {
@@ -67,6 +75,22 @@ class ShowTapsState:
         return bool(self.value) if self.present else False
 
 
+@dataclass(frozen=True)
+class RoleState:
+    holders: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PermissionState:
+    granted: bool
+
+
+@dataclass(frozen=True)
+class SettingState:
+    present: bool
+    value: str | None
+
+
 def redact_serial(serial: str) -> str:
     return f"…{serial[-4:]}" if len(serial) > 4 else "…"
 
@@ -78,6 +102,20 @@ def redact_line(line: str, serial: str | None = None) -> str:
 
 def redact_error(error: Exception, serial: str | None = None) -> str:
     return redact_line(str(error), serial)
+
+
+def manifest_default(action: CaptureDefault) -> dict[str, object]:
+    """Return a persisted description without arbitrary setting values."""
+    if isinstance(action, PermissionDefault):
+        return {
+            "type": action.type,
+            "package": action.package,
+            "permission": action.permission,
+            "state": action.state,
+        }
+    if isinstance(action, RoleDefault):
+        return {"type": action.type, "role": action.role, "holders": action.holders}
+    return {"type": action.type, "namespace": action.namespace, "key": action.key}
 
 
 def _run_text(command: Sequence[str], timeout: float = 10, *, serial: str | None = None) -> str:
@@ -221,6 +259,94 @@ def show_taps_update_command(adb: str, serial: str, user: int, value: bool | Non
     operation = ["delete", "system", "show_touches"]
     if value is not None:
         operation = ["put", "system", "show_touches", "1" if value else "0"]
+    return adb_shell_command(adb, serial, ["settings", "--user", str(user), *operation])
+
+
+def parse_role_holders(output: str) -> RoleState:
+    holders = tuple(line.strip() for line in output.splitlines() if line.strip())
+    package_pattern = r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+"
+    if any(not re.fullmatch(package_pattern, item) for item in holders):
+        raise PrerequisiteError("Android returned an invalid role holder")
+    return RoleState(holders)
+
+
+def role_state(adb: str, serial: str, user: int, role: str) -> RoleState:
+    output = _run_text(
+        adb_shell_command(
+            adb, serial, ["cmd", "role", "get-role-holders", "--user", str(user), role]
+        ),
+        serial=serial,
+    )
+    return parse_role_holders(output)
+
+
+def role_update_command(
+    adb: str, serial: str, user: int, operation: str, role: str, package: str
+) -> list[str]:
+    if operation not in {"add-role-holder", "remove-role-holder"}:
+        raise ValueError("Unsupported Android role operation")
+    return adb_shell_command(
+        adb,
+        serial,
+        ["cmd", "role", operation, "--user", str(user), role, package],
+    )
+
+
+def parse_permission_state(output: str) -> PermissionState:
+    value = output.strip().replace("\r", "").lower()
+    result = value.rsplit(maxsplit=1)[-1] if value else ""
+    if result == "granted":
+        return PermissionState(True)
+    if result == "denied":
+        return PermissionState(False)
+    raise PrerequisiteError(f"Android returned an invalid permission state: {value!r}")
+
+
+def permission_state(
+    adb: str, serial: str, user: int, package: str, permission: str
+) -> PermissionState:
+    return parse_permission_state(
+        _run_text(
+            adb_shell_command(
+                adb,
+                serial,
+                ["cmd", "package", "check-permission", permission, str(user), package],
+            ),
+            serial=serial,
+        )
+    )
+
+
+def permission_update_command(
+    adb: str, serial: str, user: int, package: str, permission: str, granted: bool
+) -> list[str]:
+    return adb_shell_command(
+        adb,
+        serial,
+        ["pm", "grant" if granted else "revoke", "--user", str(user), package, permission],
+    )
+
+
+def parse_setting_state(output: str) -> SettingState:
+    value = output.replace("\r\n", "\n").removesuffix("\n")
+    return SettingState(False, None) if value == "null" else SettingState(True, value)
+
+
+def setting_state(adb: str, serial: str, user: int, namespace: str, key: str) -> SettingState:
+    return parse_setting_state(
+        _run_text(
+            adb_shell_command(
+                adb, serial, ["settings", "--user", str(user), "get", namespace, key]
+            ),
+            serial=serial,
+        )
+    )
+
+
+def setting_update_command(
+    adb: str, serial: str, user: int, namespace: str, key: str, value: str | None
+) -> list[str]:
+    operation = ["delete", namespace, key] if value is None else ["put", namespace, key, value]
     return adb_shell_command(adb, serial, ["settings", "--user", str(user), *operation])
 
 
@@ -629,6 +755,176 @@ class ShowTapsController:
                 self.original_state.value,
             )
         )
+
+
+class DefaultsController:
+    """Best-effort, declarative Android defaults with exact state restoration."""
+
+    def __init__(
+        self, *, adb: str, serial: str, user: int, cwd: Path, log_path: Path, verbose: bool = False
+    ) -> None:
+        self.adb = adb
+        self.serial = serial
+        self.user = user
+        self.cwd = cwd
+        self.log_path = log_path
+        self.verbose = verbose
+        self.original: dict[str, object] = {}
+        self.actions: dict[str, CaptureDefault] = {}
+        self.target_order: list[str] = []
+        self.events: list[dict[str, object]] = []
+
+    def _target(self, action: CaptureDefault) -> str:
+        if isinstance(action, PermissionDefault):
+            return f"permission:{action.package}:{action.permission}"
+        if isinstance(action, RoleDefault):
+            return f"role:{action.role}"
+        return f"setting:{action.namespace}:{action.key}"
+
+    def _read(self, action: CaptureDefault) -> object:
+        if isinstance(action, PermissionDefault):
+            return permission_state(
+                self.adb, self.serial, self.user, action.package, action.permission
+            )
+        if isinstance(action, RoleDefault):
+            return role_state(self.adb, self.serial, self.user, action.role)
+        return setting_state(self.adb, self.serial, self.user, action.namespace, action.key)
+
+    def _desired(self, action: CaptureDefault) -> object:
+        if isinstance(action, PermissionDefault):
+            return PermissionState(action.state == "granted")
+        if isinstance(action, RoleDefault):
+            return RoleState(tuple(action.holders))
+        return SettingState(action.value is not None, action.value)
+
+    def _commands_to_set(self, action: CaptureDefault, state: object) -> list[list[str]]:
+        if isinstance(action, PermissionDefault):
+            assert isinstance(state, PermissionState)
+            return [
+                permission_update_command(
+                    self.adb,
+                    self.serial,
+                    self.user,
+                    action.package,
+                    action.permission,
+                    state.granted,
+                )
+            ]
+        if isinstance(action, RoleDefault):
+            assert isinstance(state, RoleState)
+            observed = self._read(action)
+            assert isinstance(observed, RoleState)
+            commands = [
+                role_update_command(
+                    self.adb, self.serial, self.user, "remove-role-holder", action.role, holder
+                )
+                for holder in observed.holders
+            ]
+            commands.extend(
+                role_update_command(
+                    self.adb, self.serial, self.user, "add-role-holder", action.role, holder
+                )
+                for holder in state.holders
+            )
+            return commands
+        assert isinstance(action, SettingDefault)
+        assert isinstance(state, SettingState)
+        return [
+            setting_update_command(
+                self.adb, self.serial, self.user, action.namespace, action.key, state.value
+            )
+        ]
+
+    def _run_commands(self, commands: list[list[str]]) -> None:
+        for command in commands:
+            result = run_supervised(
+                command,
+                cwd=self.cwd,
+                timeout_seconds=10,
+                log_path=self.log_path,
+                serial=self.serial,
+                on_line=print if self.verbose else None,
+                append=self.log_path.exists(),
+            )
+            if result.returncode:
+                raise PrerequisiteError(f"Android default update returned {result.returncode}")
+
+    def _event(self, action: CaptureDefault, operation: str) -> dict[str, object]:
+        return {"action": operation, "default": manifest_default(action), "status": "warning"}
+
+    def inspect(self, actions: list[CaptureDefault]) -> None:
+        for action in actions:
+            target = self._target(action)
+            if target in self.actions:
+                continue
+            self.actions[target] = action
+            self.target_order.append(target)
+            try:
+                self.original[target] = self._read(action)
+            except Exception as error:
+                event = self._event(action, "inspect")
+                event["error"] = redact_error(error, self.serial)
+                self.events.append(event)
+
+    def ensure(self, action: CaptureDefault) -> dict[str, object]:
+        target = self._target(action)
+        event: dict[str, object]
+        if target not in self.actions:
+            self.actions[target] = action
+            self.target_order.append(target)
+        if target not in self.original:
+            try:
+                self.original[target] = self._read(action)
+            except Exception as error:
+                event = self._event(action, "inspect")
+                event["error"] = redact_error(error, self.serial)
+                self.events.append(event)
+                return event
+        try:
+            desired = self._desired(action)
+            observed = self._read(action)
+            if observed == desired:
+                event = {
+                    "action": "ensure",
+                    "default": manifest_default(action),
+                    "status": "unchanged",
+                }
+            else:
+                self._run_commands(self._commands_to_set(action, desired))
+                if self._read(action) != desired:
+                    raise PrerequisiteError("Android default did not reach its requested state")
+                event = {
+                    "action": "ensure",
+                    "default": manifest_default(action),
+                    "status": "succeeded",
+                }
+        except Exception as error:
+            event = self._event(action, "ensure")
+            event["error"] = redact_error(error, self.serial)
+        self.events.append(event)
+        return event
+
+    def restore(self) -> list[dict[str, object]]:
+        restoration: list[dict[str, object]] = []
+        for target in reversed(self.target_order):
+            if target not in self.original:
+                continue
+            action = self.actions[target]
+            try:
+                self._run_commands(self._commands_to_set(action, self.original[target]))
+                if self._read(action) != self.original[target]:
+                    raise PrerequisiteError("Android default did not restore its original state")
+                event: dict[str, object] = {
+                    "action": "restore",
+                    "default": manifest_default(action),
+                    "status": "succeeded",
+                }
+            except Exception as error:
+                event = self._event(action, "restore")
+                event["error"] = redact_error(error, self.serial)
+            self.events.append(event)
+            restoration.append(event)
+        return restoration
 
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:

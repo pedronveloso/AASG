@@ -44,12 +44,76 @@ def test_dry_run_writes_resolved_manifest(tmp_path: Path) -> None:
     )
 
     assert outcome.failed == 0
-    assert outcome.manifest["schema"] == 4
+    assert outcome.manifest["schema"] == 5
     assert outcome.manifest["navigation"]["status"] == "ignored"
     assert outcome.manifest["show_taps"]["status"] == "ignored"
     assert outcome.manifest["variants"][0]["status"] == "succeeded"
     assert outcome.manifest["assets"] == ["artifacts/screenshots/raw/en/home-light.png"]
     assert (outcome.run_root / "run.json").is_file()
+
+
+def test_dry_run_plans_capture_defaults(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["defaults"] = [
+        {
+            "type": "role",
+            "role": "android.app.role.BROWSER",
+            "holders": ["com.example.app"],
+        },
+        {"type": "setting", "namespace": "global", "key": "font_scale", "value": "1.0"},
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    config = load_config(path)
+
+    outcome = CaptureRunner().run(
+        config=config,
+        config_path=path,
+        device=Device("dry-run", "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+        dry_run=True,
+    )
+
+    assert outcome.manifest["defaults"]["status"] == "planned"
+    assert [event["status"] for event in outcome.manifest["variants"][0]["default_events"]] == [
+        "planned",
+        "planned",
+    ]
+    assert "value" not in outcome.manifest["defaults"]["defaults"][1]
+    assert "value" not in outcome.manifest["variants"][0]["default_events"][1]["default"]
+    assert "1.0" not in (outcome.run_root / "run.json").read_text()
+
+
+def test_default_initialization_warning_does_not_block_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["defaults"] = [
+        {"type": "setting", "namespace": "global", "key": "font_scale", "value": "1.0"}
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    config = load_config(path)
+    runner = CaptureRunner()
+    monkeypatch.setattr(
+        "aasg.capture.active_user",
+        lambda *args: (_ for _ in ()).throw(PrerequisiteError("no user")),
+    )
+    monkeypatch.setattr(
+        "aasg.capture.run_supervised", lambda *args, **kwargs: CommandResult(0, 0.1)
+    )
+    monkeypatch.setattr(runner, "_collect_variant", lambda *args, **kwargs: ([], []))
+
+    outcome = runner.run(
+        config=config,
+        config_path=path,
+        device=Device("ABC", "device"),
+        selection=Selection(["home"], ["en"], ["light"]),
+    )
+
+    assert outcome.exit_code == 0
+    assert outcome.manifest["defaults"]["status"] == "warning"
+    assert outcome.manifest["variants"][0]["status"] == "succeeded"
 
 
 def test_collected_artifact_records_semantic_metadata_checksum(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

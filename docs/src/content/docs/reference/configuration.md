@@ -18,7 +18,7 @@ frame sources, and rendering pipelines.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schema` | Yes | Must be `5`. Change only when migrating an AASG schema release. |
+| `schema` | Yes | Must be `7`. Change only when migrating an AASG schema release. |
 | `project` | No | Output and timeout defaults. |
 | `android` | Yes | Host commands and Android test output settings. |
 | `variants` | Yes | Named locale, theme, and capture-group values. |
@@ -88,6 +88,7 @@ Capture-level `locales` and `themes` can narrow these declared values.
 | `locales` | No | Selected locale IDs; each must exist in `variants.locales`. |
 | `themes` | No | Selected theme IDs; each must exist in `variants.themes`. |
 | `navigation` | No | `ignore`; one of `gestural`, `three-button`, `all`, `ignore`. |
+| `defaults` | No | `[]`; ordered, typed Android defaults applied before each variant and restored after the run. |
 | `show_taps` | No | `true`; controls Android's Show taps setting for video captures. |
 | `artifacts` | Yes | Declared files produced by this test. |
 
@@ -95,6 +96,40 @@ When `navigation: all`, every artifact and rendition `publish` path must contain
 `{navigation}` formatter field. This prevents capture modes overwriting one another.
 A capture containing a video artifact may contain JSON artifacts, but may not mix video
 and image artifacts.
+
+### `captures.<id>.defaults[]`
+
+Defaults are declarative Android state prerequisites, targeted at the active Android
+user. AASG snapshots every successfully inspected target once, applies this capture's
+actions before each variant, and restores targets in reverse order after the run.
+Warnings while inspecting, applying, or restoring a default are recorded in the run
+manifest and do not prevent capture publication; AASG retries application for later
+variants. Setting values are never persisted in the run manifest or its events.
+
+| `type` | Required fields | Behavior |
+| --- | --- | --- |
+| `permission` | `package`, `permission`, `state` | Sets a runtime permission to `granted` or `revoked`. |
+| `role` | `role`, `holders` | Sets the exact Android role-holder package list; `holders` may be empty. |
+| `setting` | `namespace`, `key`, `value` | Sets a named `system`, `secure`, or `global` setting. `null` deletes it. |
+
+Package, role, permission, and setting-key identifiers are validated. `system.show_touches`
+is reserved for the video-aware `show_taps` field and cannot be declared as a default.
+Unknown default action types are rejected until a future schema release supports them.
+
+To migrate schema 6 browser routing, replace:
+
+```yaml
+browser_role_holder: com.example.app
+```
+
+with:
+
+```yaml
+defaults:
+  - type: role
+    role: android.app.role.BROWSER
+    holders: [com.example.app]
+```
 
 ### `captures.<id>.artifacts[]`
 

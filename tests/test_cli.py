@@ -65,7 +65,7 @@ def test_config_validate(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "validate", "--config", str(path)])
 
     assert result.exit_code == 0
-    assert "Valid schema 5" in result.output
+    assert "Valid schema 7" in result.output
 
 
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:
