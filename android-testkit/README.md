@@ -8,6 +8,8 @@ another test driver.
 androidTestImplementation("io.github.pedronveloso:aasg-testkit:0.10.1")
 ```
 
+Browse published versions on [Maven Central](https://central.sonatype.com/artifact/io.github.pedronveloso/aasg-testkit).
+
 Open an AndroidX Test Storage output stream, start the app's screen recorder, and then start the
 timeline clock:
 
