@@ -5,7 +5,7 @@ Android instrumentation actions. It does not navigate the app or replace Compose
 another test driver.
 
 ```kotlin
-androidTestImplementation("io.github.pedronveloso:aasg-testkit:0.10.0")
+androidTestImplementation("io.github.pedronveloso:aasg-testkit:0.10.1")
 ```
 
 Open an AndroidX Test Storage output stream, start the app's screen recorder, and then start the
