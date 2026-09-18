@@ -49,6 +49,7 @@ def test_package_versions_are_synchronized() -> None:
         for line in (root / "android-testkit" / "gradle.properties").read_text().splitlines()
         if line and not line.startswith("#")
     )
+    testkit_build = (root / "android-testkit" / "build.gradle.kts").read_text(encoding="utf-8")
 
     assert len(packages) == 1
     assert (
@@ -57,6 +58,7 @@ def test_package_versions_are_synchronized() -> None:
         == testkit_properties["VERSION_NAME"]
         == __version__
     )
+    assert 'groupId = "io.github.pedronveloso"' in testkit_build
 
 
 def test_config_validate(tmp_path: Path) -> None:

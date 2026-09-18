@@ -3,7 +3,7 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
-group = "com.pedronveloso.aasg"
+group = "io.github.pedronveloso"
 version = providers.gradleProperty("VERSION_NAME").get()
 
 repositories {
@@ -34,7 +34,7 @@ dependencies {
 
 mavenPublishing {
     coordinates(
-        groupId = "com.pedronveloso.aasg",
+        groupId = "io.github.pedronveloso",
         artifactId = "aasg-testkit",
         version = project.version.toString(),
     )

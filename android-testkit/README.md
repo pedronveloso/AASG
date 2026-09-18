@@ -5,7 +5,7 @@ Android instrumentation actions. It does not navigate the app or replace Compose
 another test driver.
 
 ```kotlin
-androidTestImplementation("com.pedronveloso.aasg:aasg-testkit:0.9.0")
+androidTestImplementation("io.github.pedronveloso:aasg-testkit:0.10.0")
 ```
 
 Open an AndroidX Test Storage output stream, start the app's screen recorder, and then start the
@@ -48,7 +48,7 @@ past the end of the clip.
 The module is a Kotlin/JVM library so it can be consumed by Android instrumentation tests without
 imposing an Android Gradle Plugin or minimum-SDK version. A non-prerelease GitHub release tagged
 with the shared AASG version publishes signed artifacts to Maven Central. The repository must first
-have the `com.pedronveloso.aasg` namespace verified in the Central Portal and these Actions secrets:
+have the `io.github.pedronveloso` namespace verified in the Central Portal and these Actions secrets:
 
 - `MAVEN_CENTRAL_USERNAME`
 - `MAVEN_CENTRAL_PASSWORD`
