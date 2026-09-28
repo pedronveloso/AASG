@@ -63,6 +63,9 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/wrapper-validation@v6
       - uses: gradle/actions/setup-gradle@v6
+      - name: Check Android testkit ABI
+        working-directory: android-testkit
+        run: ./gradlew checkKotlinAbi
       - name: Test and package Android testkit
         working-directory: android-testkit
         run: ./gradlew test build generatePomFileForMavenPublication

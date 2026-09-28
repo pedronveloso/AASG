@@ -1,0 +1,63 @@
+public final class com/pedronveloso/aasg/testkit/GesturePacing {
+	public fun <init> ()V
+	public fun <init> (JJJ)V
+	public synthetic fun <init> (JJJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun copy (JJJ)Lcom/pedronveloso/aasg/testkit/GesturePacing;
+	public static synthetic fun copy$default (Lcom/pedronveloso/aasg/testkit/GesturePacing;JJJILjava/lang/Object;)Lcom/pedronveloso/aasg/testkit/GesturePacing;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAfterActionMs ()J
+	public final fun getBeforeActionMs ()J
+	public final fun getCueLeadMs ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/pedronveloso/aasg/testkit/GesturePoint {
+	public fun <init> (II)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Lcom/pedronveloso/aasg/testkit/GesturePoint;
+	public static synthetic fun copy$default (Lcom/pedronveloso/aasg/testkit/GesturePoint;IIILjava/lang/Object;)Lcom/pedronveloso/aasg/testkit/GesturePoint;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getX ()I
+	public final fun getY ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/pedronveloso/aasg/testkit/GestureSleeper {
+	public abstract fun sleep (J)V
+}
+
+public final class com/pedronveloso/aasg/testkit/GestureTimeline : java/io/Closeable {
+	public fun <init> (Ljava/lang/String;IILjava/io/OutputStream;Lcom/pedronveloso/aasg/testkit/GesturePacing;Lkotlin/jvm/functions/Function0;Lcom/pedronveloso/aasg/testkit/MonotonicClock;Lcom/pedronveloso/aasg/testkit/GestureSleeper;)V
+	public synthetic fun <init> (Ljava/lang/String;IILjava/io/OutputStream;Lcom/pedronveloso/aasg/testkit/GesturePacing;Lkotlin/jvm/functions/Function0;Lcom/pedronveloso/aasg/testkit/MonotonicClock;Lcom/pedronveloso/aasg/testkit/GestureSleeper;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	public final fun drag (Ljava/util/List;Lkotlin/jvm/functions/Function0;)V
+	public final fun start ()Lcom/pedronveloso/aasg/testkit/GestureTimeline;
+	public final fun swipe (Lcom/pedronveloso/aasg/testkit/GesturePoint;Lcom/pedronveloso/aasg/testkit/GesturePoint;JLkotlin/jvm/functions/Function0;)V
+	public final fun tap (Lcom/pedronveloso/aasg/testkit/GesturePoint;Lkotlin/jvm/functions/Function0;)V
+}
+
+public abstract interface class com/pedronveloso/aasg/testkit/MonotonicClock {
+	public abstract fun nowNanos ()J
+}
+
+public final class com/pedronveloso/aasg/testkit/TimedGesturePoint {
+	public fun <init> (JII)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun copy (JII)Lcom/pedronveloso/aasg/testkit/TimedGesturePoint;
+	public static synthetic fun copy$default (Lcom/pedronveloso/aasg/testkit/TimedGesturePoint;JIIILjava/lang/Object;)Lcom/pedronveloso/aasg/testkit/TimedGesturePoint;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOffsetMs ()J
+	public final fun getX ()I
+	public final fun getY ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
