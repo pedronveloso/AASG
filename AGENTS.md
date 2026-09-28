@@ -38,11 +38,13 @@ upload, or bundled FFmpeg/device artwork without an explicit product decision.
 
 - Follow Semantic Versioning 2.0.0 for releases. Before 1.0.0, incompatible public-interface
   changes increment the minor version; backwards-compatible fixes increment the patch version.
-- Bump the application version whenever a feature is completed. Features increment the minor
-  version; fixes increment the patch version unless they are incompatible before 1.0.0.
+- Bump the shared application version only when shipped AASG or Android testkit code, or a
+  dependency used by a shipped artifact, changes. Features increment the minor version; compatible
+  fixes and dependency updates increment the patch version unless they are incompatible before
+  1.0.0. Documentation, tests, CI workflows, and build tooling alone do not trigger a version bump.
 - Treat configuration schemas, semantic metadata, run manifests, CLI behavior, and documented
   Python interfaces as the public API when deciding version impact.
-- Increment the top-level `aasg.yaml` schema version whenever a YAML definition is added, removed,
+- Increment the top-level `aasg.yaml` schema version only when a YAML definition is added, removed,
   renamed, or changes meaning. Update the model, starter configuration, documentation, tests, and
   maintained pilot configurations together, and document the migration from the previous schema.
 - Use Conventional Commit messages that pass commitlint. Prefer the types `feat`, `fix`, `docs`,
@@ -71,7 +73,8 @@ file bytes.
 ## Definition of done
 
 - Public behavior is documented in `README.md`.
-- Every completed feature or fix includes the appropriate application-version bump.
+- Every change to shipped AASG or Android testkit code or dependencies includes the appropriate
+  application-version bump; documentation, tests, CI, and build tooling changes alone do not.
 - YAML contract changes include a schema-version bump, migration documentation, validation and
   compatibility tests, and updates to maintained pilot configurations.
 - New FFmpeg operations include dry-run output and media-property tests.
