@@ -35,3 +35,7 @@ npm run commitlint -- --from HEAD~1 --to HEAD
 ```
 
 Documentation is source code: update the relevant guide and, when appropriate, the canonical configuration example in the same change as the behavior it describes.
+
+## Publishing a release
+
+Publishing a non-prerelease GitHub Release tagged `v<version>` publishes the Python CLI to PyPI and the Android testkit to Maven Central. The tag must match the shared AASG version. PyPI publication uses GitHub Actions Trusted Publishing and does not use a stored PyPI token.

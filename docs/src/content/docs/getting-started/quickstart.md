@@ -13,10 +13,11 @@ Install the released command-line tool:
 
 ```shell
 uv tool install android-automated-screengrabs
+# Or: pipx install android-automated-screengrabs
 aasg --version
 ```
 
-For a checkout under development, use `uv sync` and run `uv run aasg --help`.
+Released versions are published on [PyPI](https://pypi.org/project/android-automated-screengrabs/). For a checkout under development, use `uv sync` and run `uv run aasg --help`.
 
 ## 1. Write a capture test
 

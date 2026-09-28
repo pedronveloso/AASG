@@ -31,6 +31,7 @@ The site is initially served from GitHub Pages. It will move to
 
 ```shell
 uv tool install android-automated-screengrabs
+# or: pipx install android-automated-screengrabs
 aasg init
 aasg config validate
 aasg doctor
@@ -38,6 +39,8 @@ aasg capture
 ```
 
 For source development, run `uv sync` and then `uv run aasg --help`.
+
+Released versions are published to [PyPI](https://pypi.org/project/android-automated-screengrabs/). AASG still requires the Android SDK Platform Tools, a Gradle wrapper, FFmpeg, and FFprobe; run `aasg doctor` after installation to check the local prerequisites.
 
 ## Development
 
