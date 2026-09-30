@@ -1,5 +1,5 @@
 # Paths are relative to this configuration file.
-schema: 7
+schema: 9
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -29,7 +29,8 @@ variants:
 
 captures:
   home:
-    label: Home screenshot
+    label: Home
+    description: Main screen with the current connection
     test: com.example.HomeScreenshotCaptureTest
     navigation: all
     defaults:
@@ -40,24 +41,23 @@ captures:
     artifacts:
       - id: home
         type: image
-        source: screenshots/{locale}/home-{theme}.png
-        publish: screenshots/raw/{locale}/home-{theme}-{navigation}.png
+        publish_dir: screenshots/raw/{locale}
         renditions:
-          - publish: screenshots/framed/{locale}/home-{theme}-{navigation}.png
+          - publish_dir: screenshots/framed/{locale}
             pipeline: pixel-8
   walkthrough:
-    label: Onboarding walkthrough
+    label: Walkthrough
+    description: Onboarding journey recording
     test: com.example.OnboardingVideoCaptureTest
     show_taps: false
     arguments: {recording: onboarding}
     artifacts:
       - id: walkthrough
         type: video
-        source: recordings/{locale}/onboarding-{theme}.mp4
-        metadata: recordings/{locale}/onboarding-{theme}.metadata.json
-        publish: videos/raw/{locale}/onboarding-{theme}.mp4
+        metadata: true
+        publish_dir: videos/raw/{locale}
         renditions:
-          - publish: videos/promo/{locale}/onboarding-{theme}.mp4
+          - publish_dir: videos/promo/{locale}
             pipeline: promo-video
 
 pipelines:

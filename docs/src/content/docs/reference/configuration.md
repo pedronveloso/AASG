@@ -18,7 +18,7 @@ frame sources, and rendering pipelines.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `schema` | Yes | Must be `7`. Change only when migrating an AASG schema release. |
+| `schema` | Yes | Must be `9`. Change only when migrating an AASG schema release. |
 | `project` | No | Output and timeout defaults. |
 | `android` | Yes | Host commands and Android test output settings. |
 | `variants` | Yes | Named locale, theme, and capture-group values. |
@@ -33,11 +33,11 @@ path-safe: they start alphanumeric and then use only letters, digits, `.`, `_`, 
 
 | Field | Default | Rules |
 | --- | --- | --- |
-| `artifact_root` | `artifacts` | Root for all `publish` paths. |
+| `artifact_root` | `artifacts` | Root for generated publication paths. |
 | `run_log_root` | `artifacts/aasg/runs` | Root for manifests and redacted logs. |
 | `default_timeout_seconds` | `90` | Positive integer. |
 
-Every artifact and rendition `publish` path must remain inside `artifact_root`.
+Every generated artifact and rendition path remains inside `artifact_root`.
 
 ## `android`
 
@@ -82,6 +82,7 @@ Capture-level `locales` and `themes` can narrow these declared values.
 | Field | Required | Default / rules |
 | --- | --- | --- |
 | `label` | Yes | Human-readable capture label. |
+| `description` | No | Explanatory text shown below the bold label in the interactive picker. |
 | `test` | Yes | Instrumentation test class or selector. |
 | `arguments` | No | `{}`; string-to-string test arguments. |
 | `timeout_seconds` | No | Falls back to `project.default_timeout_seconds`; positive when set. |
@@ -92,10 +93,37 @@ Capture-level `locales` and `themes` can narrow these declared values.
 | `show_taps` | No | `true`; controls Android's Show taps setting for video captures. |
 | `artifacts` | Yes | Declared files produced by this test. |
 
-When `navigation: all`, every artifact and rendition `publish` path must contain a real
-`{navigation}` formatter field. This prevents capture modes overwriting one another.
+Generated filenames contain the theme and, unless `navigation: ignore`, the navigation mode.
 A capture containing a video artifact may contain JSON artifacts, but may not mix video
 and image artifacts.
+
+### Migrating schema 8 to 9
+
+Set `schema: 9` and remove each artifact's `source`. AASG now infers the Test Storage
+source path from the capture ID, artifact type, locale, and theme. Update instrumentation
+to write to that path; the Android testkit's `CaptureOutputPaths` builds it for you.
+Replace each metadata path with `metadata: true` and write its sidecar beside the media
+using `CaptureOutputPaths.metadata(mediaPath)`. Remove `metadata` where no sidecar is
+produced. Explicit `source` and metadata path strings are rejected. Publication paths
+are unchanged, and previously published files are left in place.
+
+### Migrating schema 7 to 8
+
+Set `schema: 8`. Keep `label` short and move any explanatory text into optional
+`description`. Replace each artifact and rendition `publish` file path with its parent
+directory in `publish_dir`; keep `source` and `metadata` paths unchanged. Every
+`publish_dir` must include `{locale}`. AASG generates the filename from the capture ID,
+theme, navigation mode when used, and source extension. Renditions can set `extension`
+when their format differs from the source. For example:
+
+```yaml
+# Schema 7
+publish: screenshots/raw/{locale}/home-device-light-{navigation}.png
+# Schema 8
+publish_dir: screenshots/raw/{locale}
+```
+
+Old stable files are not renamed or deleted; new captures publish to the generated paths.
 
 ### `captures.<id>.defaults[]`
 
@@ -137,17 +165,28 @@ defaults:
 | --- | --- | --- |
 | `id` | Yes | Path-safe artifact ID. |
 | `type` | Yes | `image`, `video`, or `json`. |
-| `source` | Yes | Exact suffix inside `android.additional_output_dir`. |
-| `publish` | Yes | Stable path below `project.artifact_root`. |
-| `metadata` | No | Semantic metadata sidecar path. |
+| `publish_dir` | Yes | Directory below `project.artifact_root`; must contain `{locale}`. |
+| `metadata` | No | `false`; set `true` to require a semantic metadata sidecar for an image or video. |
 | `renditions` | No | `[]`; rendered publications. |
 
-`source`, `publish`, and rendition `publish` accept formatter fields such as
-`{capture}`, `{locale}`, `{theme}`, and `{navigation}` when that selection is present.
+The inferred Test Storage source is `aasg/screenshots/{locale}/<capture-id>-<theme>.png`
+for images, `aasg/videos/{locale}/<capture-id>-<theme>.mp4` for videos, and
+`aasg/json/{locale}/<capture-id>-<theme>.json` for JSON. For a capture with multiple
+artifacts, insert `-<artifact-id>` after `<capture-id>` in every source filename.
+Navigation variants reuse the source name because each variant is collected separately.
+With `metadata: true`, AASG also requires a file with the same stem and
+`.metadata.json` extension beside the source. Missing media or required metadata fails
+the capture. `publish_dir` accepts formatter fields such as `{capture}`, `{locale}`, and
+`{theme}`. AASG publishes media as `<capture-id>-<theme>[-<navigation>].<extension>`;
+multiple artifacts include `-<artifact-id>` before the theme. Configuration validation
+rejects generated publication path collisions.
 
 ### `renditions[]`
 
-Each rendition needs `publish` and `pipeline`. The pipeline ID must exist in
+Each rendition needs `publish_dir` and `pipeline`; optional `extension` overrides the
+source file extension. Rendered images support `.png`, `.jpg`, and `.jpeg`; rendered
+videos support `.mp4`, `.mov`, `.mkv`, and `.webm`. WebM uses VP9; other video
+containers use H.264. The pipeline ID must exist in
 `pipelines`. A rendition using `gesture_overlay` requires a video artifact with
 `metadata` and `show_taps: false` on its capture.
 

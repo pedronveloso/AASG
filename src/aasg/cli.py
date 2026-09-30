@@ -13,6 +13,7 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from aasg import __version__
 from aasg.android import (
@@ -48,7 +49,13 @@ from aasg.frames import (
     resolve_frame,
 )
 from aasg.media import MediaProcessor
-from aasg.models import AasgConfig, DeviceFrameStep, NavigationMode, RemoteFrameSource
+from aasg.models import (
+    AasgConfig,
+    CaptureConfig,
+    DeviceFrameStep,
+    NavigationMode,
+    RemoteFrameSource,
+)
 from aasg.state import load_selection, save_selection
 
 app = typer.Typer(
@@ -573,8 +580,13 @@ def _prompt_many(
         options.extend(config.variants.groups)
     console.print(f"[bold]{title}[/bold]")
     for index, key in enumerate(options, start=1):
-        label = getattr(choices.get(key), "label", choices.get(key, key))
-        console.print(f"  {index}) {key} — {label}")
+        choice = choices.get(key)
+        label = getattr(choice, "label", key)
+        line = Text(f"  {index}) {key} — ")
+        line.append(str(label), style="bold" if isinstance(choice, CaptureConfig) else "")
+        console.print(line)
+        if isinstance(choice, CaptureConfig) and choice.description:
+            console.print(Text(f"     {choice.description}", style="dim"))
     response = typer.prompt("Choose comma-separated numbers or 'all'", default="all")
     if response.strip().lower() == "all":
         return list(choices)

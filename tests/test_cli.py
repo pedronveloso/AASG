@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import json
 import tomllib
+from io import StringIO
 from pathlib import Path
 
 import yaml
 from conftest import write_config
+from rich.console import Console
 from typer.testing import CliRunner
 
 from aasg import __version__
 from aasg.android import Device, NavigationState
 from aasg.capture import CaptureOutcome
-from aasg.cli import app
+from aasg.cli import _prompt_many, app
+from aasg.config import load_config
 
 runner = CliRunner()
 
@@ -20,10 +23,6 @@ def configure_navigation(path: Path, policy: str) -> None:
     data = yaml.safe_load(path.read_text())
     capture = data["captures"]["home"]
     capture["navigation"] = policy
-    if policy == "all":
-        capture["artifacts"][0]["publish"] = (
-            "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
-        )
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
 
@@ -68,7 +67,21 @@ def test_config_validate(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "validate", "--config", str(path)])
 
     assert result.exit_code == 0
-    assert "Valid schema 7" in result.output
+    assert "Valid schema 9" in result.output
+
+
+def test_capture_picker_styles_title_and_description(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    config = load_config(write_config(tmp_path))
+    output = StringIO()
+    monkeypatch.setattr(
+        "aasg.cli.console",
+        Console(file=output, force_terminal=True, color_system="standard"),
+    )
+    monkeypatch.setattr("aasg.cli.typer.prompt", lambda *args, **kwargs: "all")
+
+    assert _prompt_many("Captures", config.captures) == ["home"]
+    assert "\x1b[1mHome\x1b[0m" in output.getvalue()
+    assert "\x1b[2m     Current connection and audio path\x1b[0m" in output.getvalue()
 
 
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:

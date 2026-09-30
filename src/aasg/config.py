@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import string
 from pathlib import Path, PurePosixPath
 
@@ -13,6 +14,11 @@ from aasg.errors import ConfigurationError
 from aasg.models import CONFIG_SCHEMA_VERSION, AasgConfig, LocalFrameSource
 
 ALLOWED_TEMPLATE_FIELDS = {"capture", "locale", "theme", "navigation", "artifact", "stem"}
+SOURCE_KINDS = {
+    "image": ("screenshots", ".png"),
+    "video": ("videos", ".mp4"),
+    "json": ("json", ".json"),
+}
 
 
 def load_config(path: Path) -> AasgConfig:
@@ -36,6 +42,8 @@ def load_config(path: Path) -> AasgConfig:
         raise ConfigurationError(str(error)) from error
     validate_templates(config)
     validate_declared_paths(config, path)
+    validate_source_paths(config)
+    validate_publication_paths(config, path)
     return config
 
 
@@ -66,10 +74,33 @@ def validate_templates(config: AasgConfig) -> None:
     templates: list[str] = []
     for capture in config.captures.values():
         for artifact in capture.artifacts:
-            templates.extend([artifact.source, artifact.publish])
-            if artifact.metadata:
-                templates.append(artifact.metadata)
-            templates.extend(rendition.publish for rendition in artifact.renditions)
+            templates.append(artifact.publish_dir)
+            templates.extend(rendition.publish_dir for rendition in artifact.renditions)
+            for publish_dir in [
+                artifact.publish_dir,
+                *(r.publish_dir for r in artifact.renditions),
+            ]:
+                if not any(
+                    field == "locale" for _, field, _, _ in string.Formatter().parse(publish_dir)
+                ):
+                    raise ConfigurationError(
+                        f"Publication directory must contain {{locale}}: {publish_dir!r}"
+                    )
+            if artifact.metadata and artifact.type == "json":
+                raise ConfigurationError("JSON artifacts cannot have a metadata sidecar")
+            for rendition in artifact.renditions:
+                extension = publication_extension(
+                    rendition.extension or SOURCE_KINDS[artifact.type][1]
+                ).lower()
+                supported = (
+                    {".png", ".jpg", ".jpeg"}
+                    if artifact.type == "image"
+                    else {".mp4", ".mov", ".mkv", ".webm"}
+                )
+                if artifact.type == "json" or extension not in supported:
+                    raise ConfigurationError(
+                        f"Unsupported {artifact.type} rendition extension: {extension}"
+                    )
     formatter = string.Formatter()
     for template in templates:
         template_path = PurePosixPath(template)
@@ -82,6 +113,141 @@ def validate_templates(config: AasgConfig) -> None:
                 )
             if format_spec or conversion:
                 raise ConfigurationError(f"Formatting modifiers are not supported in {template!r}")
+
+
+def publication_extension(value: str) -> str:
+    extension = value if value.startswith(".") and "/" not in value else PurePosixPath(value).suffix
+    if not re.fullmatch(r"\.[A-Za-z0-9]+", extension):
+        raise ConfigurationError(f"Publication extension must be a simple file suffix: {value!r}")
+    return extension
+
+
+def source_path(
+    *,
+    capture_id: str,
+    artifact_id: str,
+    artifact_count: int,
+    artifact_type: str,
+    locale: str,
+    theme: str,
+) -> str:
+    directory, extension = SOURCE_KINDS[artifact_type]
+    parts = [capture_id]
+    if artifact_count > 1:
+        parts.append(artifact_id)
+    parts.append(theme)
+    return str(PurePosixPath("aasg") / directory / locale / ("-".join(parts) + extension))
+
+
+def metadata_path(source: str) -> str:
+    return str(PurePosixPath(source).with_suffix(".metadata.json"))
+
+
+def publication_path(
+    publish_dir: str,
+    *,
+    capture_id: str,
+    artifact_id: str,
+    artifact_count: int,
+    artifact_type: str,
+    locale: str,
+    theme: str,
+    navigation: str,
+    extension: str | None = None,
+) -> str:
+    values = {
+        "capture": capture_id,
+        "artifact": artifact_id,
+        "stem": artifact_id,
+        "locale": locale,
+        "theme": theme,
+        "navigation": navigation,
+    }
+    directory = render_template(publish_dir, **values)
+    parts = [capture_id]
+    if artifact_count > 1:
+        parts.append(artifact_id)
+    parts.append(theme)
+    if navigation != "ignore":
+        parts.append(navigation)
+    suffix = publication_extension(extension or SOURCE_KINDS[artifact_type][1])
+    return str(PurePosixPath(directory) / ("-".join(parts) + suffix))
+
+
+def validate_source_paths(config: AasgConfig) -> None:
+    seen: dict[str, str] = {}
+    for capture_id, capture in config.captures.items():
+        for locale in capture.locales or config.variants.locales:
+            for theme in capture.themes or config.variants.themes:
+                for artifact in capture.artifacts:
+                    source = source_path(
+                        capture_id=capture_id,
+                        artifact_id=artifact.id,
+                        artifact_count=len(capture.artifacts),
+                        artifact_type=artifact.type,
+                        locale=locale,
+                        theme=theme,
+                    )
+                    owner = f"{capture_id}/{artifact.id}/{locale}/{theme}"
+                    paths = [source]
+                    if artifact.metadata:
+                        paths.append(metadata_path(source))
+                    for relative in paths:
+                        if previous := seen.get(relative.casefold()):
+                            raise ConfigurationError(
+                                f"Inferred source path collision at {relative!r}: "
+                                f"{previous} and {owner}"
+                            )
+                        seen[relative.casefold()] = owner
+
+
+def validate_publication_paths(config: AasgConfig, config_path: Path) -> None:
+    artifact_root = project_path(config_path, config.project.artifact_root)
+    seen: dict[str, str] = {}
+    for capture_id, capture in config.captures.items():
+        navigation_modes = (
+            ["gestural", "three-button"] if capture.navigation == "all" else [capture.navigation]
+        )
+        for locale in capture.locales or config.variants.locales:
+            for theme in capture.themes or config.variants.themes:
+                for navigation in navigation_modes:
+                    for artifact in capture.artifacts:
+                        paths = [
+                            publication_path(
+                                artifact.publish_dir,
+                                capture_id=capture_id,
+                                artifact_id=artifact.id,
+                                artifact_count=len(capture.artifacts),
+                                artifact_type=artifact.type,
+                                locale=locale,
+                                theme=theme,
+                                navigation=navigation,
+                            )
+                        ]
+                        paths.extend(
+                            publication_path(
+                                rendition.publish_dir,
+                                capture_id=capture_id,
+                                artifact_id=artifact.id,
+                                artifact_count=len(capture.artifacts),
+                                artifact_type=artifact.type,
+                                locale=locale,
+                                theme=theme,
+                                navigation=navigation,
+                                extension=rendition.extension,
+                            )
+                            for rendition in artifact.renditions
+                        )
+                        owner = f"{capture_id}/{artifact.id}/{locale}/{theme}/{navigation}"
+                        for relative in paths:
+                            destination = resolve_inside(artifact_root, relative)
+                            collision_key = str(destination).casefold()
+                            if previous := seen.get(collision_key):
+                                raise ConfigurationError(
+                                    f"Publication path collision at {relative!r}: "
+                                    f"{previous} and {owner}"
+                                )
+                            seen[collision_key] = owner
 
 
 def render_template(template: str, **values: str) -> str:
@@ -106,7 +272,7 @@ def project_path(config_path: Path, value: str) -> Path:
 
 
 STARTER_CONFIG = """# AASG configuration. Paths are relative to this file.
-schema: 7
+schema: 9
 project:
   artifact_root: artifacts
   run_log_root: artifacts/aasg/runs
@@ -135,6 +301,7 @@ variants:
 captures:
   home:
     label: Home
+    description: Main screen after setup
     test: com.example.HomeScreenshotCaptureTest
     navigation: ignore
     # Optional Android defaults are applied before each variant and restored after the run.
@@ -146,18 +313,17 @@ captures:
     artifacts:
       - id: home
         type: image
-        source: screenshots/{locale}/home-{theme}.png
-        publish: screenshots/raw/{locale}/home-{theme}.png
+        publish_dir: screenshots/raw/{locale}
   walkthrough:
     label: Walkthrough
+    description: Recorded onboarding journey
     test: com.example.WalkthroughVideoCaptureTest
     show_taps: true
     arguments: {recording: walkthrough}
     artifacts:
       - id: walkthrough
         type: video
-        source: recordings/{locale}/walkthrough-{theme}.mp4
-        publish: videos/raw/{locale}/walkthrough-{theme}.mp4
+        publish_dir: videos/raw/{locale}
 pipelines: {}
 frame_sources: {}
 """

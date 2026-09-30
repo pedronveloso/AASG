@@ -7,7 +7,7 @@ import yaml
 
 def write_config(root: Path, overrides: dict[str, object] | None = None) -> Path:
     data: dict[str, object] = {
-        "schema": 7,
+        "schema": 9,
         "project": {
             "artifact_root": "artifacts",
             "run_log_root": "artifacts/aasg/runs",
@@ -31,14 +31,14 @@ def write_config(root: Path, overrides: dict[str, object] | None = None) -> Path
         "captures": {
             "home": {
                 "label": "Home",
+                "description": "Current connection and audio path",
                 "test": "example.HomeCaptureTest",
                 "arguments": {"scenario": "home"},
                 "artifacts": [
                     {
                         "id": "home",
                         "type": "image",
-                        "source": "screenshots/{locale}/home-{theme}.png",
-                        "publish": "screenshots/raw/{locale}/home-{theme}.png",
+                        "publish_dir": "screenshots/raw/{locale}",
                     }
                 ],
             }

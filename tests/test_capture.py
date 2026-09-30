@@ -19,7 +19,7 @@ from aasg.capture import (
     has_selectable_navigation,
 )
 from aasg.config import load_config
-from aasg.errors import CaptureError, ExitCode, PrerequisiteError
+from aasg.errors import CaptureError, ExitCode, PrerequisiteError, ProcessingError
 
 
 def test_expands_groups_and_all_variants(tmp_path: Path) -> None:
@@ -50,6 +50,54 @@ def test_dry_run_writes_resolved_manifest(tmp_path: Path) -> None:
     assert outcome.manifest["variants"][0]["status"] == "succeeded"
     assert outcome.manifest["assets"] == ["artifacts/screenshots/raw/en/home-light.png"]
     assert (outcome.run_root / "run.json").is_file()
+
+
+def test_dry_run_names_multiple_artifacts_and_rendition_extension(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    capture = data["captures"]["home"]
+    capture["navigation"] = "all"
+    capture["artifacts"] = [
+        {
+            "id": "recording",
+            "type": "video",
+            "publish_dir": "videos/raw/{locale}",
+            "renditions": [
+                {
+                    "publish_dir": "videos/framed/{locale}",
+                    "pipeline": "transcode",
+                    "extension": ".webm",
+                }
+            ],
+        },
+        {
+            "id": "timeline",
+            "type": "json",
+            "publish_dir": "videos/raw/{locale}",
+        },
+    ]
+    data["pipelines"] = {"transcode": {"steps": []}}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    (tmp_path / "gradlew").touch()
+
+    outcome = CaptureRunner().run(
+        config=load_config(path),
+        config_path=path,
+        device=Device("dry-run", "device"),
+        selection=Selection(["home"], ["en"], ["light"], ["three-button"]),
+        dry_run=True,
+    )
+
+    assert outcome.manifest["assets"] == [
+        "artifacts/videos/raw/en/home-recording-light-three-button.mp4",
+        "artifacts/videos/framed/en/home-recording-light-three-button.webm",
+        "artifacts/videos/raw/en/home-timeline-light-three-button.json",
+    ]
+    records = outcome.manifest["variants"][0]["artifacts"]
+    assert [record["source"] for record in records] == [
+        "aasg/videos/en/home-recording-light.mp4",
+        "aasg/json/en/home-timeline-light.json",
+    ]
 
 
 def test_dry_run_plans_capture_defaults(tmp_path: Path) -> None:
@@ -120,11 +168,11 @@ def test_collected_artifact_records_semantic_metadata_checksum(tmp_path: Path, m
     path = write_config(tmp_path)
     data = yaml.safe_load(path.read_text())
     artifact = data["captures"]["home"]["artifacts"][0]
-    artifact["metadata"] = "screenshots/{locale}/home-{theme}.metadata.json"
+    artifact["metadata"] = True
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     config = load_config(path)
     additional_output = tmp_path / config.android.additional_output_dir
-    source = additional_output / "worker" / "screenshots" / "en" / "home-light.png"
+    source = additional_output / "worker" / "aasg" / "screenshots" / "en" / "home-light.png"
     metadata = source.with_name("home-light.metadata.json")
     source.parent.mkdir(parents=True)
     source.write_bytes(b"image")
@@ -148,9 +196,39 @@ def test_collected_artifact_records_semantic_metadata_checksum(tmp_path: Path, m
     )
 
     assert records[0]["metadata"] == {
-        "source": "screenshots/en/home-light.metadata.json",
+        "source": "aasg/screenshots/en/home-light.metadata.json",
         "sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
     }
+
+
+def test_missing_required_metadata_fails_capture(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["artifacts"][0]["metadata"] = True
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    config = load_config(path)
+    additional_output = tmp_path / config.android.additional_output_dir
+    source = additional_output / "worker" / "aasg" / "screenshots" / "en" / "home-light.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"image")
+    runner = CaptureRunner()
+    monkeypatch.setattr(runner, "_validate", lambda *args: None)
+
+    with pytest.raises(ProcessingError, match=r"home-light\.metadata\.json"):
+        runner._collect_variant(
+            config,
+            path,
+            tmp_path / "artifacts",
+            additional_output,
+            tmp_path / "run",
+            "home",
+            config.captures["home"],
+            "en",
+            "light",
+            "ignore",
+            {},
+            False,
+        )
 
 
 def configured_video_path(tmp_path: Path, *, show_taps: bool = True) -> Path:
@@ -191,15 +269,12 @@ def test_dry_run_expands_mixed_navigation_policies(tmp_path: Path) -> None:
     data = yaml.safe_load(path.read_text())
     home = data["captures"]["home"]
     home["navigation"] = "all"
-    home["artifacts"][0]["publish"] = "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
     fixed = copy.deepcopy(home)
     fixed["label"] = "Fixed"
     fixed["navigation"] = "three-button"
-    fixed["artifacts"][0]["publish"] = "screenshots/raw/{locale}/fixed-{theme}.png"
     ignored = copy.deepcopy(home)
     ignored["label"] = "Ignored"
     ignored["navigation"] = "ignore"
-    ignored["artifacts"][0]["publish"] = "screenshots/raw/{locale}/ignored-{theme}.png"
     data["captures"] = {"home": home, "fixed": fixed, "ignored": ignored}
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     (tmp_path / "gradlew").touch()
