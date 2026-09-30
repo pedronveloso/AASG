@@ -39,7 +39,9 @@ checksums, renderer commands, and frame provenance.
 
 ## Use selection deliberately
 
-Interactive runs remember the last successful device, capture, locale, theme, and
-navigation selections outside the project. Automation should always include
-`--non-interactive` and every relevant selection option. Use `--dry-run` before a
-large matrix to inspect it without calling Android tooling.
+Interactive runs remember the last successful capture, locale, theme, and navigation
+selections outside the project. Without `--device`, AASG uses the sole online
+ADB-authorized device or emulator, or lists the online devices for an interactive
+choice. With multiple online devices, automation must pass `--device` alongside
+`--non-interactive`. Use `--dry-run` before a large matrix to inspect it without
+calling Android tooling.

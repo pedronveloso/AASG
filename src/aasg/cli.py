@@ -22,7 +22,6 @@ from aasg.android import (
     discover_devices,
     enrich_device,
     navigation_state,
-    redact_serial,
     require_active_navigation,
 )
 from aasg.capture import (
@@ -84,11 +83,8 @@ def _previous_selection_summary(previous: dict[str, object], config: AasgConfig)
         )
 
     capture_labels = {capture_id: capture.label for capture_id, capture in config.captures.items()}
-    device = previous.get("device")
-    device_label = redact_serial(device) if isinstance(device, str) else "none"
     return (
         "Previous selection:\n"
-        f"  Device: {device_label}\n"
         f"  Captures: {labeled(values('captures'), capture_labels)}\n"
         f"  Locales: {labeled(values('locales'), config.variants.locales)}\n"
         f"  Themes: {labeled(values('themes'), config.variants.themes)}\n"
@@ -355,9 +351,6 @@ def capture(
             requested_locales = list(previous.get("locales", []))
             requested_themes = list(previous.get("themes", []))
             requested_navigation = list(previous.get("navigation", []))
-            previous_device = previous.get("device")
-            if device_serial is None and isinstance(previous_device, str):
-                device_serial = previous_device
 
         if not requested_captures and not all_captures:
             if non_interactive:
@@ -422,7 +415,6 @@ def capture(
             save_selection(
                 config_path,
                 {
-                    "device": device.serial,
                     "captures": selection.captures,
                     "locales": selection.locales,
                     "themes": selection.themes,

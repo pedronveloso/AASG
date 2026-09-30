@@ -26,15 +26,15 @@ Runs selected capture IDs or groups. Use `--all` to select every capture. Import
 
 | Option | Meaning |
 | --- | --- |
-| `--device` | ADB device serial or selector. |
+| `--device` | Optional ADB device serial. Without it, use the sole online device or prompt when several are online. |
 | `--locale` | Declared locale ID, or `all`. |
 | `--theme` | Declared theme ID, or `all`. |
 | `--navigation` | `gestural`, `three-button`, or `all`; only for captures with `navigation: all`. |
-| `--non-interactive` | Reject prompts and require explicit valid choices. |
+| `--non-interactive` | Reject prompts; with multiple online devices, require `--device`. |
 | `--dry-run` | Resolve the matrix and commands without running tooling. |
 | `--json` | Emit selected assets and run data as JSON. |
 
-Without explicit arguments, an interactive run can reuse its previous successful selection. That state is outside the project directory.
+Without explicit arguments, an interactive run can reuse its previous successful capture and variant selection. The device is always resolved from the current ADB list unless `--device` is supplied. That state is outside the project directory.
 
 ## `aasg process PIPELINE INPUT`
 

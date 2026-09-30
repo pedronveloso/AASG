@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from aasg import __version__
 from aasg.android import Device, NavigationState
+from aasg.capture import CaptureOutcome
 from aasg.cli import app
 
 runner = CliRunner()
@@ -304,9 +305,82 @@ def test_capture_previews_previous_selection_before_confirmation(
 
     assert result.exit_code == 0
     assert "Previous selection:" in result.output
-    assert "Device: …5554" in result.output
+    assert "Device:" not in result.output
     assert "Captures: Home (home)" in result.output
     assert "Locales: English (en)" in result.output
     assert "Themes: Light (light)" in result.output
     assert "Navigation for 'all' captures: Gesture navigation (gestural), " in result.output
     assert "Use the previous capture selection? [Y/n]:" in result.output
+
+
+def test_capture_reused_selection_uses_only_current_online_device(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    chosen: list[str] = []
+    saved: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "aasg.cli.load_selection",
+        lambda _: {
+            "device": "stale-device",
+            "captures": ["home"],
+            "locales": ["en"],
+            "themes": ["light"],
+            "navigation": [],
+        },
+    )
+    monkeypatch.setattr("aasg.cli.discover_devices", lambda adb: [Device("current", "device")])
+    monkeypatch.setattr(
+        "aasg.cli.enrich_device", lambda adb, device: Device(device.serial, "device", api=35)
+    )
+
+    def record_capture(self, **kwargs):  # type: ignore[no-untyped-def]
+        chosen.append(kwargs["device"].serial)
+        return CaptureOutcome(tmp_path, 1, 0, 0, {})
+
+    monkeypatch.setattr("aasg.cli.CaptureRunner.run", record_capture)
+    monkeypatch.setattr("aasg.cli.save_selection", lambda _, selection: saved.append(selection))
+
+    result = runner.invoke(app, ["capture", "--config", str(path)], input="y\n")
+
+    assert result.exit_code == 0
+    assert chosen == ["current"]
+    assert saved == [
+        {"captures": ["home"], "locales": ["en"], "themes": ["light"], "navigation": []}
+    ]
+
+
+def test_capture_without_device_prompts_when_multiple_are_online(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    chosen: list[str] = []
+    devices = [
+        Device("first", "device", model="Pixel 8"),
+        Device("second", "device", model="Pixel 9"),
+    ]
+    monkeypatch.setattr("aasg.cli.discover_devices", lambda adb: devices)
+    monkeypatch.setattr(
+        "aasg.cli.enrich_device", lambda adb, device: Device(device.serial, "device", api=35)
+    )
+    monkeypatch.setattr("aasg.cli.load_selection", lambda _: None)
+    monkeypatch.setattr("aasg.cli.save_selection", lambda *_: None)
+
+    def record_capture(self, **kwargs):  # type: ignore[no-untyped-def]
+        chosen.append(kwargs["device"].serial)
+        return CaptureOutcome(tmp_path, 1, 0, 0, {})
+
+    monkeypatch.setattr("aasg.cli.CaptureRunner.run", record_capture)
+    args = ["capture", "home", "--config", str(path), "--locale", "en", "--theme", "light"]
+
+    result = runner.invoke(app, args, input="2\n")
+    non_interactive = runner.invoke(app, [*args, "--non-interactive"])
+
+    assert result.exit_code == 0
+    assert "Devices" in result.output
+    assert "Pixel 8" in result.output
+    assert "Pixel 9" in result.output
+    assert "Choose a device" in result.output
+    assert chosen == ["second"]
+    assert non_interactive.exit_code != 0
+    assert "More than one device is online; pass --device" in non_interactive.output
