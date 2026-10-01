@@ -70,6 +70,5 @@ jobs:
               pytest, uv build, the Gradle testkit checks, and the docs build, so a local
               invocation would only duplicate it. Assess lint, typing, and formatting compliance by
               reading the changes
-            - Suggest concrete, actionable improvements with file and line references, ordered by
-              severity, and say so plainly when a pull request looks good
+            - No need to suggest the fix, pointing out what needs attention suffices
             Post the resulting review on the pull request.
