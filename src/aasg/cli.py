@@ -581,7 +581,11 @@ def _prompt_many(
     console.print(f"[bold]{title}[/bold]")
     for index, key in enumerate(options, start=1):
         choice = choices.get(key)
-        label = getattr(choice, "label", key)
+        label = (
+            choice.label
+            if isinstance(choice, CaptureConfig)
+            else (choice if isinstance(choice, str) else key)
+        )
         line = Text(f"  {index}) {key} — ")
         line.append(str(label), style="bold" if isinstance(choice, CaptureConfig) else "")
         console.print(line)

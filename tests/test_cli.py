@@ -84,6 +84,25 @@ def test_capture_picker_styles_title_and_description(tmp_path: Path, monkeypatch
     assert "\x1b[2m     Current connection and audio path\x1b[0m" in output.getvalue()
 
 
+def test_variant_picker_displays_configured_string_labels(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    output = StringIO()
+    monkeypatch.setattr("aasg.cli.console", Console(file=output, color_system=None))
+    monkeypatch.setattr("aasg.cli.typer.prompt", lambda *args, **kwargs: "all")
+
+    assert _prompt_many("Locales", {"en": "English", "pt-BR": "Portuguese (Brazil)"}) == [
+        "en",
+        "pt-BR",
+    ]
+    assert _prompt_many("Themes", {"light": "Light", "dark": "Dark"}) == ["light", "dark"]
+    assert _prompt_many("Navigation", {"gestural": "Gesture navigation"}) == ["gestural"]
+    text = output.getvalue()
+    assert "1) en — English" in text
+    assert "2) pt-BR — Portuguese (Brazil)" in text
+    assert "1) light — Light" in text
+    assert "2) dark — Dark" in text
+    assert "1) gestural — Gesture navigation" in text
+
+
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:
     path = tmp_path / "aasg.yaml"
 
