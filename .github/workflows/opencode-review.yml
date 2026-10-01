@@ -1,0 +1,74 @@
+name: opencode-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+
+      - name: Run OpenCode review
+        uses: anomalyco/opencode/github@014614d35b397775e5d397a490fc72368c894ec2 # v1.18.31
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: opencode/big-pickle
+          agent: pr-review
+          use_github_token: true
+          prompt: |
+            Review this pull request following the repository guidelines in AGENTS.md.
+            - Check for correctness and potential bugs, and flag anything that breaks an
+              invariant the repository depends on
+            - Treat configuration schemas, semantic metadata, run manifests, CLI behavior, and the
+              Android testkit ABI as versioned public interfaces; flag changes to them that are not
+              documented in README.md and the docs site
+            - Verify version-bump discipline: changes to shipped AASG or testkit code, or to
+              dependencies used by shipped artifacts, must bump the shared version and keep
+              pyproject.toml, src/aasg/__init__.py, uv.lock, and the testkit release version in
+              sync, while documentation, tests, CI, and build tooling changes must not
+            - For YAML contract changes, require a schema-version bump together with the model,
+              starter configuration, documentation, migration guidance, validation and compatibility
+              tests, and maintained pilot configurations
+            - Verify external commands run as argument arrays with no shell, project paths resolve
+              from aasg.yaml and reject traversal outside declared roots, configuration stays
+              strict, versioned, and free of executable shell snippets, and device serials and
+              likely credentials are redacted from persisted logs
+            - Verify existing stable artifacts are preserved until a full replacement variant has
+              been captured, validated, and rendered, and that capture failures keep successful
+              outputs plus a useful run manifest and log
+            - Verify remote frame assets are not silently refreshed, record URLs, hashes, and license
+              provenance, and never imply that third-party frame assets inherit AASG's Apache-2.0
+              license
+            - Note missing or insufficient tests, whether regression tests were added for fixed
+              bugs, and whether tests mirror behavior at module and CLI boundaries; media tests
+              should assert dimensions, duration, pixel alpha, and stream format rather than encoded
+              file bytes
+            - For Android testkit changes, check Kotlin explicit API mode and whether a checked-in
+              ABI baseline update is intentional rather than a way to make a failing check pass
+            - Check that new FFmpeg operations include dry-run output and media-property tests
+            - Do not run builds or the test suite. CI already runs ruff format, ruff check, mypy,
+              pytest, uv build, the Gradle testkit checks, and the docs build, so a local
+              invocation would only duplicate it. Assess lint, typing, and formatting compliance by
+              reading the changes
+            - No need to suggest the fix, pointing out what needs attention suffices
+            Post the resulting review on the pull request.

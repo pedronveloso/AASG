@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import copy
 import json
+import subprocess
 import tomllib
+from io import StringIO
 from pathlib import Path
 
 import yaml
 from conftest import write_config
+from rich.console import Console
 from typer.testing import CliRunner
 
 from aasg import __version__
 from aasg.android import Device, NavigationState
-from aasg.cli import app
+from aasg.capture import CaptureOutcome
+from aasg.cli import _prompt_many, _required_render_encoders, app
+from aasg.config import load_config
 
 runner = CliRunner()
 
@@ -19,10 +25,6 @@ def configure_navigation(path: Path, policy: str) -> None:
     data = yaml.safe_load(path.read_text())
     capture = data["captures"]["home"]
     capture["navigation"] = policy
-    if policy == "all":
-        capture["artifacts"][0]["publish"] = (
-            "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
-        )
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
 
@@ -67,7 +69,63 @@ def test_config_validate(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "validate", "--config", str(path)])
 
     assert result.exit_code == 0
-    assert "Valid schema 7" in result.output
+    assert "Valid schema 9" in result.output
+
+
+def test_init_creates_valid_starter_configuration(tmp_path: Path) -> None:
+    path = tmp_path / "aasg.yaml"
+
+    assert runner.invoke(app, ["init", str(path)]).exit_code == 0
+    assert load_config(path).schema_version == 9
+    result = runner.invoke(app, ["config", "validate", "--config", str(path)])
+
+    assert result.exit_code == 0
+    assert "Valid schema 9" in result.output
+
+
+def test_config_validate_reports_malformed_template_as_usage_error(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["artifacts"][0]["publish_dir"] = "screenshots/{locale"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    result = runner.invoke(app, ["config", "validate", "--config", str(path)])
+
+    assert result.exit_code == 2
+    assert "Malformed template: 'screenshots/{locale'" in result.output
+
+
+def test_capture_picker_styles_title_and_description(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    config = load_config(write_config(tmp_path))
+    output = StringIO()
+    monkeypatch.setattr(
+        "aasg.cli.console",
+        Console(file=output, force_terminal=True, color_system="standard"),
+    )
+    monkeypatch.setattr("aasg.cli.typer.prompt", lambda *args, **kwargs: "all")
+
+    assert _prompt_many("Captures", config.captures) == ["home"]
+    assert "\x1b[1mHome\x1b[0m" in output.getvalue()
+    assert "\x1b[2m     Current connection and audio path\x1b[0m" in output.getvalue()
+
+
+def test_variant_picker_displays_configured_string_labels(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    output = StringIO()
+    monkeypatch.setattr("aasg.cli.console", Console(file=output, color_system=None))
+    monkeypatch.setattr("aasg.cli.typer.prompt", lambda *args, **kwargs: "all")
+
+    assert _prompt_many("Locales", {"en": "English", "pt-BR": "Portuguese (Brazil)"}) == [
+        "en",
+        "pt-BR",
+    ]
+    assert _prompt_many("Themes", {"light": "Light", "dark": "Dark"}) == ["light", "dark"]
+    assert _prompt_many("Navigation", {"gestural": "Gesture navigation"}) == ["gestural"]
+    text = output.getvalue()
+    assert "1) en — English" in text
+    assert "2) pt-BR — Portuguese (Brazil)" in text
+    assert "1) light — Light" in text
+    assert "2) dark — Dark" in text
+    assert "1) gestural — Gesture navigation" in text
 
 
 def test_init_refuses_to_overwrite_with_usage_exit(tmp_path: Path) -> None:
@@ -281,6 +339,69 @@ def test_doctor_reports_system_navigation_capabilities(tmp_path: Path, monkeypat
     assert "active three-button" in result.output
 
 
+def test_doctor_reports_missing_configured_ffmpeg_encoders(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["pipelines"] = {"copy": {"steps": []}}
+    image = data["captures"]["home"]["artifacts"][0]
+    image["renditions"] = [
+        {"publish_dir": "screenshots/framed/{locale}", "pipeline": "copy", "extension": ".jpeg"}
+    ]
+    video_capture = copy.deepcopy(data["captures"]["home"])
+    video_capture["artifacts"][0].update(
+        {"id": "walkthrough", "type": "video", "publish_dir": "videos/raw/{locale}"}
+    )
+    video_capture["artifacts"][0]["renditions"] = [
+        {"publish_dir": "videos/processed/{locale}", "pipeline": "copy", "extension": ".webm"}
+    ]
+    data["captures"]["walkthrough"] = video_capture
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    monkeypatch.setattr("aasg.cli.shutil.which", lambda executable: f"/bin/{executable}")
+    monkeypatch.setattr("aasg.cli.discover_devices", lambda adb: [])
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=" V..... mjpeg  JPEG encoder\n")
+
+    monkeypatch.setattr("aasg.cli.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["doctor", "--config", str(path), "--json"])
+    encoder_check = next(
+        check for check in json.loads(result.output) if check["check"] == "FFmpeg encoders"
+    )
+
+    assert result.exit_code == 3
+    assert commands == [["/bin/ffmpeg", "-hide_banner", "-encoders"]]
+    assert encoder_check == {
+        "check": "FFmpeg encoders",
+        "ok": False,
+        "detail": "required: libvpx-vp9, mjpeg; missing: libvpx-vp9",
+    }
+
+
+def test_doctor_includes_intermediate_render_encoders(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["pipelines"] = {"resize": {"steps": [{"type": "resize", "width": 100, "height": 200}]}}
+    artifact = data["captures"]["home"]["artifacts"][0]
+    artifact["renditions"] = [
+        {"publish_dir": "screenshots/framed/{locale}", "pipeline": "resize", "extension": ".jpeg"}
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert _required_render_encoders(load_config(path)) == {"png", "mjpeg"}
+
+    artifact["type"] = "video"
+    artifact["publish_dir"] = "videos/raw/{locale}"
+    artifact["renditions"] = [
+        {"publish_dir": "videos/processed/{locale}", "pipeline": "resize", "extension": ".webm"}
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert _required_render_encoders(load_config(path)) == {"ffv1", "libvpx-vp9"}
+
+
 def test_capture_previews_previous_selection_before_confirmation(
     tmp_path: Path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
@@ -304,9 +425,82 @@ def test_capture_previews_previous_selection_before_confirmation(
 
     assert result.exit_code == 0
     assert "Previous selection:" in result.output
-    assert "Device: …5554" in result.output
+    assert "Device:" not in result.output
     assert "Captures: Home (home)" in result.output
     assert "Locales: English (en)" in result.output
     assert "Themes: Light (light)" in result.output
     assert "Navigation for 'all' captures: Gesture navigation (gestural), " in result.output
     assert "Use the previous capture selection? [Y/n]:" in result.output
+
+
+def test_capture_reused_selection_uses_only_current_online_device(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    chosen: list[str] = []
+    saved: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "aasg.cli.load_selection",
+        lambda _: {
+            "device": "stale-device",
+            "captures": ["home"],
+            "locales": ["en"],
+            "themes": ["light"],
+            "navigation": [],
+        },
+    )
+    monkeypatch.setattr("aasg.cli.discover_devices", lambda adb: [Device("current", "device")])
+    monkeypatch.setattr(
+        "aasg.cli.enrich_device", lambda adb, device: Device(device.serial, "device", api=35)
+    )
+
+    def record_capture(self, **kwargs):  # type: ignore[no-untyped-def]
+        chosen.append(kwargs["device"].serial)
+        return CaptureOutcome(tmp_path, 1, 0, 0, {})
+
+    monkeypatch.setattr("aasg.cli.CaptureRunner.run", record_capture)
+    monkeypatch.setattr("aasg.cli.save_selection", lambda _, selection: saved.append(selection))
+
+    result = runner.invoke(app, ["capture", "--config", str(path)], input="y\n")
+
+    assert result.exit_code == 0
+    assert chosen == ["current"]
+    assert saved == [
+        {"captures": ["home"], "locales": ["en"], "themes": ["light"], "navigation": []}
+    ]
+
+
+def test_capture_without_device_prompts_when_multiple_are_online(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    chosen: list[str] = []
+    devices = [
+        Device("first", "device", model="Pixel 8"),
+        Device("second", "device", model="Pixel 9"),
+    ]
+    monkeypatch.setattr("aasg.cli.discover_devices", lambda adb: devices)
+    monkeypatch.setattr(
+        "aasg.cli.enrich_device", lambda adb, device: Device(device.serial, "device", api=35)
+    )
+    monkeypatch.setattr("aasg.cli.load_selection", lambda _: None)
+    monkeypatch.setattr("aasg.cli.save_selection", lambda *_: None)
+
+    def record_capture(self, **kwargs):  # type: ignore[no-untyped-def]
+        chosen.append(kwargs["device"].serial)
+        return CaptureOutcome(tmp_path, 1, 0, 0, {})
+
+    monkeypatch.setattr("aasg.cli.CaptureRunner.run", record_capture)
+    args = ["capture", "home", "--config", str(path), "--locale", "en", "--theme", "light"]
+
+    result = runner.invoke(app, args, input="2\n")
+    non_interactive = runner.invoke(app, [*args, "--non-interactive"])
+
+    assert result.exit_code == 0
+    assert "Devices" in result.output
+    assert "Pixel 8" in result.output
+    assert "Pixel 9" in result.output
+    assert "Choose a device" in result.output
+    assert chosen == ["second"]
+    assert non_interactive.exit_code != 0
+    assert "More than one device is online; pass --device" in non_interactive.output

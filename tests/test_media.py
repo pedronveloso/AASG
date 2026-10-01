@@ -12,7 +12,7 @@ from conftest import write_config
 from aasg.config import load_config
 from aasg.errors import ProcessingError
 from aasg.media import MediaProcessor, probe
-from aasg.models import AasgConfig
+from aasg.models import AasgConfig, PipelineConfig
 
 
 def make_image(path: Path, *, size: str = "100x100", color: str = "red") -> None:
@@ -32,6 +32,110 @@ def make_image(path: Path, *, size: str = "100x100", color: str = "red") -> None
         ],
         check=True,
     )
+
+
+def test_image_rendition_extension_encodes_jpeg(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    make_image(source)
+    path = write_config(tmp_path)
+    config = load_config(path)
+    output = tmp_path / "image.jpg"
+    processor = MediaProcessor()
+    pipeline = PipelineConfig(steps=[])
+
+    dry_run = processor.process(
+        source,
+        output,
+        pipeline,
+        config=config,
+        config_path=path,
+        dry_run=True,
+    )
+    processor.process(
+        source,
+        output,
+        pipeline,
+        config=config,
+        config_path=path,
+    )
+
+    assert any("-q:v 2" in command and "final.jpg" in command for command in dry_run.commands)
+    assert (probe(output).width, probe(output).height) == (100, 100)
+    details = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=nw=1",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "codec_name=mjpeg" in details
+
+
+def test_video_rendition_extension_encodes_webm(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=48x64:rate=10:duration=0.5",
+            "-an",
+            "-c:v",
+            "libx264",
+            str(source),
+        ],
+        check=True,
+    )
+    path = write_config(tmp_path)
+    config = load_config(path)
+    output = tmp_path / "video.webm"
+    processor = MediaProcessor()
+    pipeline = PipelineConfig(steps=[])
+
+    dry_run = processor.process(
+        source,
+        output,
+        pipeline,
+        config=config,
+        config_path=path,
+        dry_run=True,
+    )
+    processor.process(source, output, pipeline, config=config, config_path=path)
+
+    assert any("libvpx-vp9" in command and "final.webm" in command for command in dry_run.commands)
+    assert (probe(output).width, probe(output).height) == (48, 64)
+    details = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name:format=format_name",
+            "-of",
+            "json",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    media = json.loads(details.stdout)
+    assert media["streams"][0]["codec_name"] == "vp9"
+    assert "webm" in media["format"]["format_name"]
 
 
 def rgba_pixels(path: Path) -> bytes:

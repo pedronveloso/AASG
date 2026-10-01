@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -13,6 +15,7 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from aasg import __version__
 from aasg.android import (
@@ -22,7 +25,6 @@ from aasg.android import (
     discover_devices,
     enrich_device,
     navigation_state,
-    redact_serial,
     require_active_navigation,
 )
 from aasg.capture import (
@@ -33,7 +35,13 @@ from aasg.capture import (
     expand_variant_ids,
     has_selectable_navigation,
 )
-from aasg.config import STARTER_CONFIG, load_config, project_path
+from aasg.config import (
+    SOURCE_KINDS,
+    STARTER_CONFIG,
+    load_config,
+    project_path,
+    publication_extension,
+)
 from aasg.errors import (
     AasgError,
     CaptureError,
@@ -49,7 +57,13 @@ from aasg.frames import (
     resolve_frame,
 )
 from aasg.media import MediaProcessor
-from aasg.models import AasgConfig, DeviceFrameStep, NavigationMode, RemoteFrameSource
+from aasg.models import (
+    AasgConfig,
+    CaptureConfig,
+    DeviceFrameStep,
+    NavigationMode,
+    RemoteFrameSource,
+)
 from aasg.state import load_selection, save_selection
 
 app = typer.Typer(
@@ -84,11 +98,8 @@ def _previous_selection_summary(previous: dict[str, object], config: AasgConfig)
         )
 
     capture_labels = {capture_id: capture.label for capture_id, capture in config.captures.items()}
-    device = previous.get("device")
-    device_label = redact_serial(device) if isinstance(device, str) else "none"
     return (
         "Previous selection:\n"
-        f"  Device: {device_label}\n"
         f"  Captures: {labeled(values('captures'), capture_labels)}\n"
         f"  Locales: {labeled(values('locales'), config.variants.locales)}\n"
         f"  Themes: {labeled(values('themes'), config.variants.themes)}\n"
@@ -143,6 +154,63 @@ def validate_config(config_path: ConfigOption = Path("aasg.yaml")) -> None:
     )
 
 
+def _required_render_encoders(config: AasgConfig) -> set[str]:
+    required: set[str] = set()
+    for capture_config in config.captures.values():
+        for artifact in capture_config.artifacts:
+            for rendition in artifact.renditions:
+                pipeline = config.pipelines[rendition.pipeline]
+                suffix = publication_extension(
+                    rendition.extension or SOURCE_KINDS[artifact.type][1]
+                ).lower()
+                if artifact.type == "image":
+                    if pipeline.steps:
+                        required.add("png")
+                    if suffix in {".jpg", ".jpeg"}:
+                        required.add("mjpeg")
+                elif artifact.type == "video":
+                    if pipeline.steps:
+                        required.add("ffv1")
+                    required.add("libvpx-vp9" if suffix == ".webm" else "libx264")
+    return required
+
+
+def _ffmpeg_encoder_check(config: AasgConfig, ffmpeg_path: str | None) -> dict[str, object]:
+    required = _required_render_encoders(config)
+    if not required:
+        return {
+            "check": "FFmpeg encoders",
+            "ok": True,
+            "detail": "no encoding required by configured renditions",
+        }
+    if ffmpeg_path is None:
+        return {"check": "FFmpeg encoders", "ok": False, "detail": "ffmpeg missing"}
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"check": "FFmpeg encoders", "ok": False, "detail": str(error)}
+    if result.returncode != 0:
+        return {
+            "check": "FFmpeg encoders",
+            "ok": False,
+            "detail": f"FFmpeg encoder listing failed (exit {result.returncode})",
+        }
+    available = set(re.findall(r"^\s*V[.A-Z]{5}\s+([A-Za-z0-9_-]+)\b", result.stdout, re.MULTILINE))
+    missing = required - available
+    return {
+        "check": "FFmpeg encoders",
+        "ok": not missing,
+        "detail": f"required: {', '.join(sorted(required))}; "
+        + (f"missing: {', '.join(sorted(missing))}" if missing else "all available"),
+    }
+
+
 @app.command()
 def doctor(
     config_path: ConfigOption = Path("aasg.yaml"),
@@ -159,6 +227,7 @@ def doctor(
     try:
         config = load_config(config_path)
         checks.append({"check": "configuration", "ok": True, "detail": str(config_path)})
+        ffmpeg_path = shutil.which("ffmpeg")
         for name, executable in (
             ("adb", config.android.adb),
             ("ffmpeg", "ffmpeg"),
@@ -166,6 +235,7 @@ def doctor(
         ):
             path = shutil.which(executable)
             checks.append({"check": name, "ok": path is not None, "detail": path or "missing"})
+        checks.append(_ffmpeg_encoder_check(config, ffmpeg_path))
         gradle = project_path(config_path, config.android.gradle_wrapper)
         checks.append({"check": "Gradle wrapper", "ok": gradle.is_file(), "detail": str(gradle)})
         if config.android.direct_instrumentation:
@@ -355,9 +425,6 @@ def capture(
             requested_locales = list(previous.get("locales", []))
             requested_themes = list(previous.get("themes", []))
             requested_navigation = list(previous.get("navigation", []))
-            previous_device = previous.get("device")
-            if device_serial is None and isinstance(previous_device, str):
-                device_serial = previous_device
 
         if not requested_captures and not all_captures:
             if non_interactive:
@@ -422,7 +489,6 @@ def capture(
             save_selection(
                 config_path,
                 {
-                    "device": device.serial,
                     "captures": selection.captures,
                     "locales": selection.locales,
                     "themes": selection.themes,
@@ -581,8 +647,17 @@ def _prompt_many(
         options.extend(config.variants.groups)
     console.print(f"[bold]{title}[/bold]")
     for index, key in enumerate(options, start=1):
-        label = getattr(choices.get(key), "label", choices.get(key, key))
-        console.print(f"  {index}) {key} — {label}")
+        choice = choices.get(key)
+        label = (
+            choice.label
+            if isinstance(choice, CaptureConfig)
+            else (choice if isinstance(choice, str) else key)
+        )
+        line = Text(f"  {index}) {key} — ")
+        line.append(str(label), style="bold" if isinstance(choice, CaptureConfig) else "")
+        console.print(line)
+        if isinstance(choice, CaptureConfig) and choice.description:
+            console.print(Text(f"     {choice.description}", style="dim"))
     response = typer.prompt("Choose comma-separated numbers or 'all'", default="all")
     if response.strip().lower() == "all":
         return list(choices)

@@ -1,3 +1,14 @@
+public final class com/pedronveloso/aasg/testkit/CaptureOutputPaths {
+	public static final field INSTANCE Lcom/pedronveloso/aasg/testkit/CaptureOutputPaths;
+	public final fun image (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+	public static synthetic fun image$default (Lcom/pedronveloso/aasg/testkit/CaptureOutputPaths;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;
+	public final fun json (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+	public static synthetic fun json$default (Lcom/pedronveloso/aasg/testkit/CaptureOutputPaths;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;
+	public final fun metadata (Ljava/lang/String;)Ljava/lang/String;
+	public final fun video (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+	public static synthetic fun video$default (Lcom/pedronveloso/aasg/testkit/CaptureOutputPaths;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;
+}
+
 public final class com/pedronveloso/aasg/testkit/GesturePacing {
 	public fun <init> ()V
 	public fun <init> (JJJ)V

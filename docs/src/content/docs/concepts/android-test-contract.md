@@ -19,12 +19,13 @@ relative to the configured additional-output tree:
 
 ```kotlin
 PlatformTestStorageRegistry.getInstance()
-  .openOutputFile("recordings/en/onboarding-light.mp4")
+  .openOutputFile(CaptureOutputPaths.video("onboarding", "en", "light"))
   .use { output -> recorder.writeTo(output.fileDescriptor) }
 ```
 
-The artifact `source` in `aasg.yaml` is an exact suffix within that tree. AASG rejects
-undeclared or stale output rather than guessing which file belongs to a capture.
+The testkit path builders follow AASG's inferred source convention. AASG looks for the
+fresh output of each capture variant under `aasg/screenshots`, `aasg/videos`, or
+`aasg/json` within that tree. It rejects missing or stale output.
 
 ## System settings AASG may manage
 

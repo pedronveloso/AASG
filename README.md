@@ -38,9 +38,22 @@ aasg doctor
 aasg capture
 ```
 
+When `--device` is omitted, capture uses the only online ADB-authorized device or emulator.
+If several are online, an interactive run lists them for selection; a non-interactive run
+requires `--device` in that case. A previous capture selection never pins the device.
+
 For source development, run `uv sync` and then `uv run aasg --help`.
 
-Released versions are published to [PyPI](https://pypi.org/project/android-automated-screengrabs/). AASG still requires the Android SDK Platform Tools, a Gradle wrapper, FFmpeg, and FFprobe; run `aasg doctor` after installation to check the local prerequisites.
+Configuration schema 9 infers AndroidX Test Storage source paths from capture IDs, locale,
+theme, and artifact type. Instrumentation tests can use `aasg-testkit` path builders to
+write those files. Publication directories still use `publish_dir`; AASG generates
+published filenames from capture IDs and selected variants. See the configuration
+reference for migration from schema 8.
+
+Released versions are published to
+[PyPI](https://pypi.org/project/android-automated-screengrabs/). AASG still requires the Android
+SDK Platform Tools, a Gradle wrapper, FFmpeg, and FFprobe; run `aasg doctor` after installation to
+check the local prerequisites and encoders needed by configured renditions.
 
 ## Development
 

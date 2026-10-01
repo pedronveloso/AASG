@@ -6,14 +6,21 @@ import pytest
 import yaml
 from conftest import write_config
 
-from aasg.config import load_config, render_template, resolve_inside
+from aasg.config import (
+    load_config,
+    metadata_path,
+    publication_path,
+    render_template,
+    resolve_inside,
+    source_path,
+)
 from aasg.errors import ConfigurationError
 
 
 def test_loads_strict_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path))
 
-    assert config.schema_version == 7
+    assert config.schema_version == 9
     assert config.captures["home"].test == "example.HomeCaptureTest"
     assert config.captures["home"].navigation == "ignore"
     assert config.captures["home"].show_taps is True
@@ -49,7 +56,7 @@ def test_accepts_capture_with_video_and_json_artifacts(tmp_path: Path) -> None:
     capture = data["captures"]["home"]
     capture["artifacts"][0]["type"] = "video"
     metadata = capture["artifacts"][0].copy()
-    metadata.update({"id": "timeline", "type": "json"})
+    metadata.update({"id": "timeline", "type": "json", "metadata": False})
     capture["artifacts"].append(metadata)
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
@@ -68,8 +75,8 @@ def test_accepts_video_gesture_overlay_with_metadata_and_native_taps_disabled(
     capture["show_taps"] = False
     artifact = capture["artifacts"][0]
     artifact["type"] = "video"
-    artifact["metadata"] = "recordings/home.metadata.json"
-    artifact["renditions"] = [{"publish": "recordings/home-promo.mp4", "pipeline": "promo"}]
+    artifact["metadata"] = True
+    artifact["renditions"] = [{"publish_dir": "recordings/{locale}", "pipeline": "promo"}]
     data["pipelines"] = {"promo": {"steps": [{"type": "gesture_overlay"}]}}
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
@@ -106,8 +113,8 @@ def test_rejects_invalid_gesture_overlay_configuration(
     artifact = capture["artifacts"][0]
     artifact["type"] = "image" if mutation == "image" else "video"
     if mutation != "metadata":
-        artifact["metadata"] = "recordings/home.metadata.json"
-    artifact["renditions"] = [{"publish": "recordings/home-promo.mp4", "pipeline": "promo"}]
+        artifact["metadata"] = True
+    artifact["renditions"] = [{"publish_dir": "recordings/{locale}", "pipeline": "promo"}]
     steps: list[dict[str, object]] = [{"type": "gesture_overlay"}]
     if mutation == "order":
         steps.insert(0, {"type": "resize", "width": 100, "height": 200})
@@ -126,10 +133,6 @@ def test_accepts_navigation_policies(tmp_path: Path, policy: str) -> None:
     data = yaml.safe_load(path.read_text())
     capture = data["captures"]["home"]
     capture["navigation"] = policy
-    if policy == "all":
-        capture["artifacts"][0]["publish"] = (
-            "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
-        )
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
     assert load_config(path).captures["home"].navigation == policy
@@ -145,59 +148,177 @@ def test_rejects_invalid_navigation_policy(tmp_path: Path) -> None:
         load_config(path)
 
 
-def test_all_navigation_requires_distinct_publication_paths(tmp_path: Path) -> None:
+def test_publication_directory_requires_locale(tmp_path: Path) -> None:
     path = write_config(tmp_path)
     data = yaml.safe_load(path.read_text())
-    data["captures"]["home"]["navigation"] = "all"
+    data["captures"]["home"]["artifacts"][0]["publish_dir"] = "screenshots/raw"
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
-    with pytest.raises(ConfigurationError, match=r"must contain \{navigation\}"):
+    with pytest.raises(ConfigurationError, match=r"must contain \{locale\}"):
         load_config(path)
 
 
-@pytest.mark.parametrize("field", ["publish", "rendition"])
-def test_all_navigation_rejects_escaped_navigation_literal(tmp_path: Path, field: str) -> None:
+@pytest.mark.parametrize("template", ["screenshots/{locale", "screenshots/{locale}/}"])
+@pytest.mark.parametrize("rendition", [False, True])
+def test_rejects_malformed_publication_directory(
+    tmp_path: Path, template: str, rendition: bool
+) -> None:
     path = write_config(tmp_path)
     data = yaml.safe_load(path.read_text())
-    capture = data["captures"]["home"]
-    capture["navigation"] = "all"
-    artifact = capture["artifacts"][0]
-    artifact["publish"] = "screenshots/raw/{locale}/home-{theme}-{navigation}.png"
-    if field == "publish":
-        artifact["publish"] = "screenshots/raw/{locale}/home-{{navigation}}.png"
-    else:
+    artifact = data["captures"]["home"]["artifacts"][0]
+    if rendition:
         data["pipelines"] = {"copy": {"steps": []}}
-        artifact["renditions"] = [
-            {
-                "publish": "screenshots/framed/{locale}/home-{{navigation}}.png",
-                "pipeline": "copy",
-            }
-        ]
+        artifact["renditions"] = [{"publish_dir": template, "pipeline": "copy"}]
+    else:
+        artifact["publish_dir"] = template
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
-    with pytest.raises(ConfigurationError, match=r"must contain \{navigation\}"):
+    with pytest.raises(ConfigurationError, match="Malformed template"):
         load_config(path)
 
 
-def test_all_navigation_accepts_literal_braces_with_navigation_field(tmp_path: Path) -> None:
+def test_rejects_publication_path_collisions(tmp_path: Path) -> None:
     path = write_config(tmp_path)
     data = yaml.safe_load(path.read_text())
-    data["captures"]["home"]["navigation"] = "all"
-    template = "screenshots/raw/{locale}/home-{{literal}}-{navigation}.png"
-    data["captures"]["home"]["artifacts"][0]["publish"] = template
+    data["pipelines"] = {"copy": {"steps": []}}
+    data["captures"]["home"]["artifacts"][0]["renditions"] = [
+        {"publish_dir": "screenshots/raw/{locale}", "pipeline": "copy"}
+    ]
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
-    load_config(path)
+    with pytest.raises(ConfigurationError, match="Publication path collision"):
+        load_config(path)
 
-    assert render_template(template, locale="en", navigation="gestural") == (
-        "screenshots/raw/en/home-{literal}-gestural.png"
+
+def test_rejects_case_only_inferred_source_path_collisions(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["Home"] = data["captures"]["home"].copy()
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match="Inferred source path collision"):
+        load_config(path)
+
+
+def test_rejects_unsupported_rendition_extension(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["pipelines"] = {"copy": {"steps": []}}
+    data["captures"]["home"]["artifacts"][0]["renditions"] = [
+        {"publish_dir": "screenshots/framed/{locale}", "pipeline": "copy", "extension": ".exe"}
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match="Unsupported image rendition extension"):
+        load_config(path)
+
+
+def test_publication_name_uses_capture_and_variant_ids() -> None:
+    assert (
+        publication_path(
+            "screenshots/raw/{locale}",
+            capture_id="store-2",
+            artifact_id="store-2",
+            artifact_count=1,
+            artifact_type="image",
+            locale="en",
+            theme="light",
+            navigation="three-button",
+        )
+        == "screenshots/raw/en/store-2-light-three-button.png"
     )
-    assert render_template(template, locale="en", navigation="three-button") == (
-        "screenshots/raw/en/home-{literal}-three-button.png"
+    assert (
+        publication_path(
+            "screenshots/raw/{locale}",
+            capture_id="home",
+            artifact_id="overview",
+            artifact_count=2,
+            artifact_type="image",
+            locale="en",
+            theme="dark",
+            navigation="ignore",
+        )
+        == "screenshots/raw/en/home-overview-dark.png"
+    )
+    assert (
+        publication_path(
+            "videos/framed/{locale}",
+            capture_id="walkthrough",
+            artifact_id="walkthrough",
+            artifact_count=1,
+            artifact_type="video",
+            locale="es",
+            theme="light",
+            navigation="gestural",
+            extension=".webm",
+        )
+        == "videos/framed/es/walkthrough-light-gestural.webm"
     )
 
 
-@pytest.mark.parametrize("schema", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize(
+    ("artifact_type", "artifact_count", "artifact_id", "expected"),
+    [
+        ("image", 1, "store-2", "aasg/screenshots/en/store-2-light.png"),
+        ("video", 1, "store-2", "aasg/videos/en/store-2-light.mp4"),
+        ("json", 1, "store-2", "aasg/json/en/store-2-light.json"),
+        ("image", 2, "card", "aasg/screenshots/en/store-2-card-light.png"),
+    ],
+)
+def test_inferred_source_paths(
+    artifact_type: str, artifact_count: int, artifact_id: str, expected: str
+) -> None:
+    source = source_path(
+        capture_id="store-2",
+        artifact_id=artifact_id,
+        artifact_count=artifact_count,
+        artifact_type=artifact_type,
+        locale="en",
+        theme="light",
+    )
+    assert source == expected
+    assert metadata_path(source) == str(Path(expected).with_suffix(".metadata.json"))
+
+
+def test_schema_nine_rejects_explicit_source_and_metadata_paths(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    artifact = data["captures"]["home"]["artifacts"][0]
+    artifact["source"] = "screenshots/{locale}/home-{theme}.png"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    with pytest.raises(ConfigurationError, match="source"):
+        load_config(path)
+
+    del artifact["source"]
+    artifact["metadata"] = "screenshots/{locale}/home-{theme}.metadata.json"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    with pytest.raises(ConfigurationError, match="metadata"):
+        load_config(path)
+
+    artifact["metadata"] = "true"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    with pytest.raises(ConfigurationError, match="metadata"):
+        load_config(path)
+
+
+def test_rejects_inferred_source_collisions(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    artifact = data["captures"]["home"]["artifacts"][0]
+    duplicate = {**artifact, "publish_dir": "screenshots/other/{locale}"}
+    data["captures"]["home"]["artifacts"].append(duplicate)
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match="Inferred source path collision"):
+        load_config(path)
+
+
+def test_accepts_literal_braces_in_directory_template() -> None:
+    template = "screenshots/{locale}/{{literal}}"
+    assert render_template(template, locale="en") == "screenshots/en/{literal}"
+
+
+@pytest.mark.parametrize("schema", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_rejects_unsupported_config_schema_with_migration_guidance(
     tmp_path: Path, schema: int
 ) -> None:
@@ -205,7 +326,7 @@ def test_rejects_unsupported_config_schema_with_migration_guidance(
 
     with pytest.raises(
         ConfigurationError,
-        match=rf"Unsupported configuration schema {schema}.*requires schema 7.*migrate",
+        match=rf"Unsupported configuration schema {schema}.*requires schema 9.*migrate",
     ):
         load_config(path)
 
@@ -288,17 +409,17 @@ def test_rejects_unknown_fields(tmp_path: Path) -> None:
 
 def test_rejects_unknown_template_fields(tmp_path: Path) -> None:
     path = write_config(tmp_path)
-    text = path.read_text().replace("home-{theme}.png", "home-{device}.png")
+    text = path.read_text().replace("screenshots/raw/{locale}", "screenshots/raw/{device}")
     path.write_text(text)
 
     with pytest.raises(ConfigurationError, match="device"):
         load_config(path)
 
 
-@pytest.mark.parametrize("unsafe", ["../home-{theme}.png", "/tmp/home-{theme}.png"])
+@pytest.mark.parametrize("unsafe", ["../{locale}", "/tmp/{locale}"])
 def test_rejects_unsafe_template_paths(tmp_path: Path, unsafe: str) -> None:
     path = write_config(tmp_path)
-    text = path.read_text().replace("screenshots/raw/{locale}/home-{theme}.png", unsafe)
+    text = path.read_text().replace("screenshots/raw/{locale}", unsafe)
     path.write_text(text)
 
     with pytest.raises(ConfigurationError, match="contained relative path"):
@@ -328,6 +449,11 @@ def test_render_template() -> None:
         render_template("{capture}-{navigation}", capture="home", navigation="gestural")
         == "home-gestural"
     )
+
+
+def test_render_template_rejects_malformed_format_string() -> None:
+    with pytest.raises(ConfigurationError, match="Malformed template"):
+        render_template("screenshots/{locale", locale="en")
 
 
 def test_rejects_unsafe_direct_instrumentation_device_path(tmp_path: Path) -> None:

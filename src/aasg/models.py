@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import re
-import string
 from collections.abc import Mapping
 from itertools import pairwise
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 
 class StrictModel(BaseModel):
@@ -62,16 +61,16 @@ class VariantsConfig(StrictModel):
 
 
 class RenditionConfig(StrictModel):
-    publish: str
+    publish_dir: str
     pipeline: str
+    extension: str | None = None
 
 
 class ArtifactConfig(StrictModel):
     id: str
     type: Literal["image", "video", "json"]
-    source: str
-    publish: str
-    metadata: str | None = None
+    publish_dir: str
+    metadata: StrictBool = False
     renditions: list[RenditionConfig] = Field(default_factory=list)
 
 
@@ -140,6 +139,7 @@ CaptureDefault = Annotated[
 
 class CaptureConfig(StrictModel):
     label: str
+    description: str | None = None
     test: str
     arguments: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int | None = Field(default=None, gt=0)
@@ -313,15 +313,11 @@ class LocalFrameSource(StrictModel):
 
 FrameSource = Annotated[RemoteFrameSource | LocalFrameSource, Field(discriminator="kind")]
 
-CONFIG_SCHEMA_VERSION = 7
-
-
-def _has_template_field(template: str, field: str) -> bool:
-    return any(field_name == field for _, field_name, _, _ in string.Formatter().parse(template))
+CONFIG_SCHEMA_VERSION = 9
 
 
 class AasgConfig(StrictModel):
-    schema_version: Literal[7] = Field(alias="schema")
+    schema_version: Literal[9] = Field(alias="schema")
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     android: AndroidConfig
     variants: VariantsConfig
@@ -360,16 +356,6 @@ class AasgConfig(StrictModel):
                 if theme not in self.variants.themes:
                     raise ValueError(f"capture {capture_id!r} references unknown theme {theme!r}")
             for artifact in capture.artifacts:
-                if capture.navigation == "all":
-                    navigation_paths = [artifact.publish]
-                    navigation_paths.extend(rendition.publish for rendition in artifact.renditions)
-                    if any(
-                        not _has_template_field(path, "navigation") for path in navigation_paths
-                    ):
-                        raise ValueError(
-                            f"capture {capture_id!r} uses navigation 'all', so every publication "
-                            "path must contain {navigation} as a formatter field"
-                        )
                 for rendition in artifact.renditions:
                     if rendition.pipeline not in self.pipelines:
                         raise ValueError(
@@ -380,7 +366,7 @@ class AasgConfig(StrictModel):
                     if any(isinstance(step, GestureOverlayStep) for step in pipeline.steps):
                         if artifact.type != "video":
                             raise ValueError("gesture_overlay supports video artifacts only")
-                        if artifact.metadata is None:
+                        if not artifact.metadata:
                             raise ValueError("gesture_overlay requires artifact metadata")
                         if capture.show_taps:
                             raise ValueError(

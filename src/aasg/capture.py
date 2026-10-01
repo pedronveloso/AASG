@@ -34,7 +34,15 @@ from aasg.artifacts import (
     sha256,
     stage_copy,
 )
-from aasg.config import project_path, render_template, resolve_inside
+from aasg.config import (
+    metadata_path as inferred_metadata_path,
+)
+from aasg.config import (
+    project_path,
+    publication_path,
+    resolve_inside,
+    source_path,
+)
 from aasg.errors import AasgError, CaptureError, ConfigurationError, ExitCode, PrerequisiteError
 from aasg.media import MediaProcessor, probe
 from aasg.models import AasgConfig, ArtifactConfig, CaptureConfig, CaptureDefault, NavigationMode
@@ -790,14 +798,39 @@ class CaptureRunner:
         }
         staging_root = run_root / "staging" / capture_id / navigation / locale / theme
         for artifact in capture.artifacts:
-            artifact_values = {**values, "artifact": artifact.id, "stem": artifact.id}
-            source_suffix = render_template(artifact.source, **artifact_values)
-            publish_relative = render_template(artifact.publish, **artifact_values)
+            source_suffix = source_path(
+                capture_id=capture_id,
+                artifact_id=artifact.id,
+                artifact_count=len(capture.artifacts),
+                artifact_type=artifact.type,
+                locale=locale,
+                theme=theme,
+            )
+
+            def published(
+                directory: str,
+                extension: str | None = None,
+                artifact_id: str = artifact.id,
+                artifact_type: str = artifact.type,
+            ) -> str:
+                return publication_path(
+                    directory,
+                    capture_id=capture_id,
+                    artifact_id=artifact_id,
+                    artifact_count=len(capture.artifacts),
+                    artifact_type=artifact_type,
+                    locale=locale,
+                    theme=theme,
+                    navigation=navigation,
+                    extension=extension,
+                )
+
+            publish_relative = published(artifact.publish_dir)
             destination = resolve_inside(artifact_root, publish_relative)
             if dry_run:
                 planned_renditions = []
                 for rendition in artifact.renditions:
-                    rendition_relative = render_template(rendition.publish, **artifact_values)
+                    rendition_relative = published(rendition.publish_dir, rendition.extension)
                     planned_renditions.append(
                         {
                             "pipeline": rendition.pipeline,
@@ -814,7 +847,7 @@ class CaptureRunner:
                 }
                 if artifact.metadata:
                     planned_record["metadata"] = {
-                        "source": render_template(artifact.metadata, **artifact_values),
+                        "source": inferred_metadata_path(source_suffix),
                         "status": "planned",
                     }
                 staged_records.append(planned_record)
@@ -825,7 +858,7 @@ class CaptureRunner:
             self._validate(staged_source, artifact)
             metadata_path = self._stage_metadata(
                 artifact,
-                artifact_values,
+                source_suffix,
                 additional_output,
                 before,
                 staging_root,
@@ -838,15 +871,13 @@ class CaptureRunner:
                 "renditions": [],
             }
             if metadata_path is not None:
-                metadata_template = artifact.metadata
-                assert metadata_template is not None
                 record["metadata"] = {
-                    "source": render_template(metadata_template, **artifact_values),
+                    "source": inferred_metadata_path(source_suffix),
                     "sha256": sha256(metadata_path),
                 }
             publications.append((staged_source, destination))
             for rendition_index, rendition in enumerate(artifact.renditions):
-                rendition_relative = render_template(rendition.publish, **artifact_values)
+                rendition_relative = published(rendition.publish_dir, rendition.extension)
                 rendition_destination = resolve_inside(artifact_root, rendition_relative)
                 staged_rendition = (
                     staging_root
@@ -878,14 +909,14 @@ class CaptureRunner:
     @staticmethod
     def _stage_metadata(
         artifact: ArtifactConfig,
-        values: dict[str, str],
+        source_suffix: str,
         additional_output: Path,
         before: dict[str, tuple[int, int]],
         staging_root: Path,
     ) -> Path | None:
         if not artifact.metadata:
             return None
-        suffix = render_template(artifact.metadata, **values)
+        suffix = inferred_metadata_path(source_suffix)
         source = find_fresh_output(additional_output, suffix, before)
         destination = staging_root / "metadata" / source.name
         stage_copy(source, destination)

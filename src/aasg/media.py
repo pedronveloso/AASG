@@ -107,6 +107,14 @@ class MediaProcessor:
         if not source.is_file():
             raise ProcessingError(f"Input media does not exist: {source}")
         info = probe(source, self.ffprobe)
+        output_suffix = destination.suffix.lower()
+        supported = (
+            {".png", ".jpg", ".jpeg"} if info.kind == "image" else {".mp4", ".mov", ".mkv", ".webm"}
+        )
+        if output_suffix not in supported:
+            raise ProcessingError(
+                f"Unsupported {info.kind} rendition extension: {output_suffix or destination.name}"
+            )
         metadata = self._load_metadata(metadata_path, source.name)
         commands: list[str] = []
         frame_provenance: list[dict[str, Any]] = []
@@ -174,19 +182,33 @@ class MediaProcessor:
                     self._execute(command)
                 current = output
 
-            final_temporary = temporary_root / (
-                "final.png" if info.kind == "image" else "final.mp4"
-            )
+            final_temporary = temporary_root / f"final{output_suffix}"
             if info.kind == "image":
-                if pipeline.steps:
+                if current.suffix.lower() == output_suffix:
+                    if not pipeline.steps:
+                        commands.append(
+                            f"copy {shlex.quote(str(source))} {shlex.quote(str(destination))}"
+                        )
                     if not dry_run:
                         shutil.copy2(current, final_temporary)
                 else:
-                    commands.append(
-                        f"copy {shlex.quote(str(source))} {shlex.quote(str(destination))}"
-                    )
+                    final_command = [
+                        self.ffmpeg,
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-i",
+                        str(current),
+                        "-frames:v",
+                        "1",
+                    ]
+                    if output_suffix in {".jpg", ".jpeg"}:
+                        final_command.extend(["-q:v", "2"])
+                    final_command.append(str(final_temporary))
+                    commands.append(shlex.join(final_command))
                     if not dry_run:
-                        shutil.copy2(source, final_temporary)
+                        self._execute(final_command)
             else:
                 padding_color = self._video_padding_color(pipeline, variables or {})
                 final_command = [
@@ -203,13 +225,14 @@ class MediaProcessor:
                     f"color={padding_color},format=yuv420p",
                     "-an",
                     "-c:v",
-                    "libx264",
-                    "-crf",
-                    str(pipeline.crf),
-                    "-movflags",
-                    "+faststart",
-                    str(final_temporary),
                 ]
+                if output_suffix == ".webm":
+                    final_command.extend(["libvpx-vp9", "-b:v", "0", "-crf", str(pipeline.crf)])
+                else:
+                    final_command.extend(["libx264", "-crf", str(pipeline.crf)])
+                    if output_suffix in {".mp4", ".mov"}:
+                        final_command.extend(["-movflags", "+faststart"])
+                final_command.append(str(final_temporary))
                 commands.append(shlex.join(final_command))
                 if not dry_run:
                     self._execute(final_command)

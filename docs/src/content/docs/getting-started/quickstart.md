@@ -26,11 +26,13 @@ ready, write the media to AndroidX Test Storage:
 
 ```kotlin
 PlatformTestStorageRegistry.getInstance()
-  .openOutputFile("screenshots/en/home-light.png")
+  .openOutputFile(CaptureOutputPaths.image("home", "en", "light"))
   .use { output -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, output) }
 ```
 
-The output path must match an artifact `source` suffix in the AASG configuration.
+The testkit helper writes `aasg/screenshots/en/home-light.png`, the source path AASG
+infers from the capture ID and variant. Use its `video`, `json`, and `metadata` builders
+for other artifact types and sidecars.
 
 ## 2. Create `aasg.yaml`
 
@@ -41,7 +43,7 @@ aasg init
 ```
 
 The generated file is intentionally small. Update the Gradle task, AndroidX Test
-Storage output directory, test class, and artifact paths for your project. Read the
+Storage output directory, test class, and publication directories for your project. Read the
 [canonical schema example](../../reference/configuration/#canonical-example) before
 adding variants and pipelines.
 
@@ -67,9 +69,9 @@ For CI or repeatable automation, make the selection explicit:
 aasg capture home --device emulator-5554 --locale en --theme light --non-interactive
 ```
 
-Add `--navigation gestural` or `--navigation three-button` only after the selected
-capture uses `navigation: all` and every artifact and rendition publication path includes
-`{navigation}`. That policy makes each system-navigation variant publish separately.
+Add `--navigation gestural` or `--navigation three-button` only when the selected
+capture uses `navigation: all`. AASG includes the navigation mode in each generated
+filename, so variants publish separately.
 
 Use `--dry-run` to inspect the selected matrix and commands without invoking Android
 tooling. A real run creates a run manifest and command logs under the configured
