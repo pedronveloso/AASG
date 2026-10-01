@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import json
+import subprocess
 import tomllib
 from io import StringIO
 from pathlib import Path
@@ -13,7 +15,7 @@ from typer.testing import CliRunner
 from aasg import __version__
 from aasg.android import Device, NavigationState
 from aasg.capture import CaptureOutcome
-from aasg.cli import _prompt_many, app
+from aasg.cli import _prompt_many, _required_render_encoders, app
 from aasg.config import load_config
 
 runner = CliRunner()
@@ -68,6 +70,29 @@ def test_config_validate(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Valid schema 9" in result.output
+
+
+def test_init_creates_valid_starter_configuration(tmp_path: Path) -> None:
+    path = tmp_path / "aasg.yaml"
+
+    assert runner.invoke(app, ["init", str(path)]).exit_code == 0
+    assert load_config(path).schema_version == 9
+    result = runner.invoke(app, ["config", "validate", "--config", str(path)])
+
+    assert result.exit_code == 0
+    assert "Valid schema 9" in result.output
+
+
+def test_config_validate_reports_malformed_template_as_usage_error(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["captures"]["home"]["artifacts"][0]["publish_dir"] = "screenshots/{locale"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    result = runner.invoke(app, ["config", "validate", "--config", str(path)])
+
+    assert result.exit_code == 2
+    assert "Malformed template: 'screenshots/{locale'" in result.output
 
 
 def test_capture_picker_styles_title_and_description(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -312,6 +337,69 @@ def test_doctor_reports_system_navigation_capabilities(tmp_path: Path, monkeypat
     assert result.exit_code == 0
     assert "System navigation" in result.output
     assert "active three-button" in result.output
+
+
+def test_doctor_reports_missing_configured_ffmpeg_encoders(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["pipelines"] = {"copy": {"steps": []}}
+    image = data["captures"]["home"]["artifacts"][0]
+    image["renditions"] = [
+        {"publish_dir": "screenshots/framed/{locale}", "pipeline": "copy", "extension": ".jpeg"}
+    ]
+    video_capture = copy.deepcopy(data["captures"]["home"])
+    video_capture["artifacts"][0].update(
+        {"id": "walkthrough", "type": "video", "publish_dir": "videos/raw/{locale}"}
+    )
+    video_capture["artifacts"][0]["renditions"] = [
+        {"publish_dir": "videos/processed/{locale}", "pipeline": "copy", "extension": ".webm"}
+    ]
+    data["captures"]["walkthrough"] = video_capture
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    monkeypatch.setattr("aasg.cli.shutil.which", lambda executable: f"/bin/{executable}")
+    monkeypatch.setattr("aasg.cli.discover_devices", lambda adb: [])
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=" V..... mjpeg  JPEG encoder\n")
+
+    monkeypatch.setattr("aasg.cli.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["doctor", "--config", str(path), "--json"])
+    encoder_check = next(
+        check for check in json.loads(result.output) if check["check"] == "FFmpeg encoders"
+    )
+
+    assert result.exit_code == 3
+    assert commands == [["/bin/ffmpeg", "-hide_banner", "-encoders"]]
+    assert encoder_check == {
+        "check": "FFmpeg encoders",
+        "ok": False,
+        "detail": "required: libvpx-vp9, mjpeg; missing: libvpx-vp9",
+    }
+
+
+def test_doctor_includes_intermediate_render_encoders(tmp_path: Path) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data["pipelines"] = {"resize": {"steps": [{"type": "resize", "width": 100, "height": 200}]}}
+    artifact = data["captures"]["home"]["artifacts"][0]
+    artifact["renditions"] = [
+        {"publish_dir": "screenshots/framed/{locale}", "pipeline": "resize", "extension": ".jpeg"}
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert _required_render_encoders(load_config(path)) == {"png", "mjpeg"}
+
+    artifact["type"] = "video"
+    artifact["publish_dir"] = "videos/raw/{locale}"
+    artifact["renditions"] = [
+        {"publish_dir": "videos/processed/{locale}", "pipeline": "resize", "extension": ".webm"}
+    ]
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    assert _required_render_encoders(load_config(path)) == {"ffv1", "libvpx-vp9"}
 
 
 def test_capture_previews_previous_selection_before_confirmation(

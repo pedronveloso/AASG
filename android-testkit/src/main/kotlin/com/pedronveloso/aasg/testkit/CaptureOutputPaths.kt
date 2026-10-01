@@ -2,6 +2,7 @@ package com.pedronveloso.aasg.testkit
 
 /** AndroidX Test Storage paths matching AASG's inferred source convention. */
 public object CaptureOutputPaths {
+    /** Build an image source path. Supply [artifactId] only for captures with multiple artifacts. */
     public fun image(
         captureId: String,
         locale: String,
@@ -9,6 +10,7 @@ public object CaptureOutputPaths {
         artifactId: String? = null,
     ): String = media("screenshots", ".png", captureId, locale, theme, artifactId)
 
+    /** Build a video source path. Supply [artifactId] only for captures with multiple artifacts. */
     public fun video(
         captureId: String,
         locale: String,
@@ -16,6 +18,7 @@ public object CaptureOutputPaths {
         artifactId: String? = null,
     ): String = media("videos", ".mp4", captureId, locale, theme, artifactId)
 
+    /** Build a JSON source path. Supply [artifactId] only for captures with multiple artifacts. */
     public fun json(
         captureId: String,
         locale: String,
@@ -23,6 +26,7 @@ public object CaptureOutputPaths {
         artifactId: String? = null,
     ): String = media("json", ".json", captureId, locale, theme, artifactId)
 
+    /** Build the semantic metadata sidecar path for an image or video source path. */
     public fun metadata(mediaPath: String): String {
         require(mediaPath.startsWith("aasg/") && '/' in mediaPath && '.' in mediaPath.substringAfterLast('/')) {
             "Expected an AASG media path"

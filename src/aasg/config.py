@@ -80,9 +80,7 @@ def validate_templates(config: AasgConfig) -> None:
                 artifact.publish_dir,
                 *(r.publish_dir for r in artifact.renditions),
             ]:
-                if not any(
-                    field == "locale" for _, field, _, _ in string.Formatter().parse(publish_dir)
-                ):
+                if not any(field == "locale" for _, field, _, _ in _parse_template(publish_dir)):
                     raise ConfigurationError(
                         f"Publication directory must contain {{locale}}: {publish_dir!r}"
                     )
@@ -101,18 +99,24 @@ def validate_templates(config: AasgConfig) -> None:
                     raise ConfigurationError(
                         f"Unsupported {artifact.type} rendition extension: {extension}"
                     )
-    formatter = string.Formatter()
     for template in templates:
         template_path = PurePosixPath(template)
         if not template or template_path.is_absolute() or ".." in template_path.parts:
             raise ConfigurationError(f"Template must be a contained relative path: {template!r}")
-        for _, field_name, format_spec, conversion in formatter.parse(template):
+        for _, field_name, format_spec, conversion in _parse_template(template):
             if field_name and field_name not in ALLOWED_TEMPLATE_FIELDS:
                 raise ConfigurationError(
                     f"Unsupported template field {field_name!r} in {template!r}"
                 )
             if format_spec or conversion:
                 raise ConfigurationError(f"Formatting modifiers are not supported in {template!r}")
+
+
+def _parse_template(template: str) -> list[tuple[str, str | None, str | None, str | None]]:
+    try:
+        return list(string.Formatter().parse(template))
+    except ValueError as error:
+        raise ConfigurationError(f"Malformed template: {template!r}") from error
 
 
 def publication_extension(value: str) -> str:
@@ -257,6 +261,8 @@ def render_template(template: str, **values: str) -> str:
         raise ConfigurationError(
             f"Template {template!r} requires unavailable field {error.args[0]!r}"
         ) from error
+    except ValueError as error:
+        raise ConfigurationError(f"Malformed template: {template!r}") from error
 
 
 def resolve_inside(base: Path, value: str) -> Path:

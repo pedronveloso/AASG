@@ -18,7 +18,9 @@ schema version plus capture and pipeline counts.
 
 ## `aasg doctor`
 
-Checks required host programs, connected devices, configuration paths, and the local cache status of frames referenced by configured pipelines. Use `--json` for structured output.
+Checks required host programs, connected devices, configuration paths, FFmpeg encoders needed by
+configured renditions, and the local cache status of frames referenced by configured pipelines.
+Use `--json` for structured output.
 
 ## `aasg capture [CAPTURE_IDS...]`
 
@@ -39,6 +41,13 @@ Without explicit arguments, an interactive run can reuse its previous successful
 ## `aasg process PIPELINE INPUT`
 
 Applies a named pipeline to an existing file. Use `--output` for the target, `--metadata` for semantic metadata, and `--theme` when a theme-keyed background requires it. `--dry-run` prints the planned renderer commands.
+
+The `--output` suffix must be `.png`, `.jpg`, or `.jpeg` for images, or `.mp4`, `.mov`, `.mkv`, or
+`.webm` for videos. When encoding, PNG uses FFmpeg's `png` encoder, JPEG uses `mjpeg`, WebM uses
+`libvpx-vp9`, and the other video containers use `libx264`. An ad hoc `aasg process --output`
+destination may need an encoder that `aasg doctor` did not check, because doctor checks the
+configured renditions. Pipelines with image steps also need `png` for intermediate files; pipelines
+with video steps need `ffv1`.
 
 ## `aasg frames`
 

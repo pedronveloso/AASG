@@ -158,6 +158,25 @@ def test_publication_directory_requires_locale(tmp_path: Path) -> None:
         load_config(path)
 
 
+@pytest.mark.parametrize("template", ["screenshots/{locale", "screenshots/{locale}/}"])
+@pytest.mark.parametrize("rendition", [False, True])
+def test_rejects_malformed_publication_directory(
+    tmp_path: Path, template: str, rendition: bool
+) -> None:
+    path = write_config(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    artifact = data["captures"]["home"]["artifacts"][0]
+    if rendition:
+        data["pipelines"] = {"copy": {"steps": []}}
+        artifact["renditions"] = [{"publish_dir": template, "pipeline": "copy"}]
+    else:
+        artifact["publish_dir"] = template
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ConfigurationError, match="Malformed template"):
+        load_config(path)
+
+
 def test_rejects_publication_path_collisions(tmp_path: Path) -> None:
     path = write_config(tmp_path)
     data = yaml.safe_load(path.read_text())
@@ -430,6 +449,11 @@ def test_render_template() -> None:
         render_template("{capture}-{navigation}", capture="home", navigation="gestural")
         == "home-gestural"
     )
+
+
+def test_render_template_rejects_malformed_format_string() -> None:
+    with pytest.raises(ConfigurationError, match="Malformed template"):
+        render_template("screenshots/{locale", locale="en")
 
 
 def test_rejects_unsafe_direct_instrumentation_device_path(tmp_path: Path) -> None:

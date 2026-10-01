@@ -5,18 +5,22 @@ Android instrumentation actions. It does not navigate the app or replace Compose
 another test driver.
 
 ```kotlin
-androidTestImplementation("io.github.pedronveloso:aasg-testkit:0.10.1")
+androidTestImplementation("io.github.pedronveloso:aasg-testkit:0.15.0")
 ```
 
-Open an AndroidX Test Storage output stream, start the app's screen recorder, and then start the
-timeline clock:
+`CaptureOutputPaths` builds the schema 9 Test Storage paths from the capture ID, locale, and
+theme. For example, `video("onboarding", "en", "light")` returns
+`aasg/videos/en/onboarding-light.mp4`; `metadata(mediaPath)` returns
+`aasg/videos/en/onboarding-light.metadata.json`. Record the video at `mediaPath`, then open the
+sidecar output stream and start the timeline clock:
 
 ```kotlin
+val mediaPath = CaptureOutputPaths.video("onboarding", "en", "light")
 PlatformTestStorageRegistry.getInstance()
-  .openOutputFile("recordings/onboarding.metadata.json")
+  .openOutputFile(CaptureOutputPaths.metadata(mediaPath))
   .use { output ->
     GestureTimeline(
-      media = "onboarding.mp4",
+      media = mediaPath.substringAfterLast('/'),
       width = 1080,
       height = 2400,
       output = output,
@@ -28,6 +32,11 @@ PlatformTestStorageRegistry.getInstance()
     }
   }
 ```
+
+Use `CaptureOutputPaths.image()` and `CaptureOutputPaths.json()` for image and JSON artifacts.
+Pass `artifactId` to a path builder only when the capture declares more than one artifact; AASG
+adds the artifact ID to every source filename in that case. An image or video with `metadata: true`
+must also write the sidecar path returned by `CaptureOutputPaths.metadata(mediaPath)`.
 
 Call `start()` only after recording is active. Coordinates are source-video pixels with a top-left
 origin. The helper rejects coordinates outside that source space. Swipe and drag durations must

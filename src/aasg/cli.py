@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -33,7 +35,13 @@ from aasg.capture import (
     expand_variant_ids,
     has_selectable_navigation,
 )
-from aasg.config import STARTER_CONFIG, load_config, project_path
+from aasg.config import (
+    SOURCE_KINDS,
+    STARTER_CONFIG,
+    load_config,
+    project_path,
+    publication_extension,
+)
 from aasg.errors import (
     AasgError,
     CaptureError,
@@ -146,6 +154,63 @@ def validate_config(config_path: ConfigOption = Path("aasg.yaml")) -> None:
     )
 
 
+def _required_render_encoders(config: AasgConfig) -> set[str]:
+    required: set[str] = set()
+    for capture_config in config.captures.values():
+        for artifact in capture_config.artifacts:
+            for rendition in artifact.renditions:
+                pipeline = config.pipelines[rendition.pipeline]
+                suffix = publication_extension(
+                    rendition.extension or SOURCE_KINDS[artifact.type][1]
+                ).lower()
+                if artifact.type == "image":
+                    if pipeline.steps:
+                        required.add("png")
+                    if suffix in {".jpg", ".jpeg"}:
+                        required.add("mjpeg")
+                elif artifact.type == "video":
+                    if pipeline.steps:
+                        required.add("ffv1")
+                    required.add("libvpx-vp9" if suffix == ".webm" else "libx264")
+    return required
+
+
+def _ffmpeg_encoder_check(config: AasgConfig, ffmpeg_path: str | None) -> dict[str, object]:
+    required = _required_render_encoders(config)
+    if not required:
+        return {
+            "check": "FFmpeg encoders",
+            "ok": True,
+            "detail": "no encoding required by configured renditions",
+        }
+    if ffmpeg_path is None:
+        return {"check": "FFmpeg encoders", "ok": False, "detail": "ffmpeg missing"}
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"check": "FFmpeg encoders", "ok": False, "detail": str(error)}
+    if result.returncode != 0:
+        return {
+            "check": "FFmpeg encoders",
+            "ok": False,
+            "detail": f"FFmpeg encoder listing failed (exit {result.returncode})",
+        }
+    available = set(re.findall(r"^\s*V[.A-Z]{5}\s+([A-Za-z0-9_-]+)\b", result.stdout, re.MULTILINE))
+    missing = required - available
+    return {
+        "check": "FFmpeg encoders",
+        "ok": not missing,
+        "detail": f"required: {', '.join(sorted(required))}; "
+        + (f"missing: {', '.join(sorted(missing))}" if missing else "all available"),
+    }
+
+
 @app.command()
 def doctor(
     config_path: ConfigOption = Path("aasg.yaml"),
@@ -162,6 +227,7 @@ def doctor(
     try:
         config = load_config(config_path)
         checks.append({"check": "configuration", "ok": True, "detail": str(config_path)})
+        ffmpeg_path = shutil.which("ffmpeg")
         for name, executable in (
             ("adb", config.android.adb),
             ("ffmpeg", "ffmpeg"),
@@ -169,6 +235,7 @@ def doctor(
         ):
             path = shutil.which(executable)
             checks.append({"check": name, "ok": path is not None, "detail": path or "missing"})
+        checks.append(_ffmpeg_encoder_check(config, ffmpeg_path))
         gradle = project_path(config_path, config.android.gradle_wrapper)
         checks.append({"check": "Gradle wrapper", "ok": gradle.is_file(), "detail": str(gradle)})
         if config.android.direct_instrumentation:
