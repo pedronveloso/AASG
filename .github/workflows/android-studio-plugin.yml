@@ -1,0 +1,42 @@
+name: Android Studio plugin
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: Check bundled schema against AASG models
+        run: uv run python tools/generate_ide_schema.py --check
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/wrapper-validation@v6
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Test, package and verify plugin compatibility
+        working-directory: android-studio-plugin
+        run: xvfb-run ./gradlew checkKotlinFormat test buildPlugin verifyPluginProjectConfiguration verifyPlugin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aasg-android-studio-plugin
+          path: android-studio-plugin/build/distributions/*.zip
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: aasg-plugin-verification
+          path: |
+            android-studio-plugin/build/reports/tests/
+            android-studio-plugin/build/reports/pluginVerifier/

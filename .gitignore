@@ -30,6 +30,7 @@ docs/.astro/
 
 # Gradle caches
 .gradle/
+.intellijPlatform/
 
 # Local environment and editor files
 .env

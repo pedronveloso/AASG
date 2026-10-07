@@ -25,6 +25,7 @@ export default defineConfig({
           items: [
             { label: 'Android test contract', link: '/concepts/android-test-contract/' },
             { label: 'Capture workflow', link: '/guides/capture-workflow/' },
+            { label: 'Android Studio plugin', link: '/guides/android-studio/' },
             { label: 'Rendering pipelines', link: '/guides/rendering/' },
             { label: 'Device frames and licensing', link: '/guides/device-frames/' },
           ],
