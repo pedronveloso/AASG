@@ -1,0 +1,169 @@
+{
+  "AasgConfig": {
+    "schema": "Configuration schema version. AASG currently requires 9; see the migration guide for older configurations.",
+    "project": "Artifact locations and default capture timeout, relative to this configuration file.",
+    "android": "Gradle, instrumentation, device and AndroidX Test Storage configuration.",
+    "variants": "Available locales, themes and named capture groups.",
+    "captures": "Named instrumentation capture journeys; each entry declares its test and produced artifacts.",
+    "pipelines": "Named sequences of typed image or video rendering operations.",
+    "frame_sources": "Declared device frame providers with license provenance."
+  },
+  "ProjectConfig": {
+    "artifact_root": "Root for stable capture artifacts, relative to this configuration file. Defaults to artifacts.",
+    "run_log_root": "Root for run manifests and redacted logs. Defaults to artifacts/aasg/runs.",
+    "default_timeout_seconds": "Positive timeout in seconds used when a capture has no override. Defaults to 90."
+  },
+  "AndroidConfig": {
+    "min_api": "Minimum supported Android API level. Defaults to 33.",
+    "adb": "ADB executable name or path. Defaults to adb.",
+    "gradle_wrapper": "Project Gradle wrapper path, relative to this configuration file.",
+    "prepare_tasks": "Gradle tasks to prepare or install the app and tests before capture.",
+    "test_task": "Gradle task that executes the app's instrumentation capture tests.",
+    "additional_output_dir": "Host directory containing collected AndroidX Test Storage output.",
+    "locale_argument": "Instrumentation argument name used to pass the selected locale.",
+    "theme_argument": "Instrumentation argument name used to pass the selected theme.",
+    "direct_instrumentation": "Optional direct ADB instrumentation configuration."
+  },
+  "DirectInstrumentationConfig": {
+    "application_id": "Android application ID of the app under test.",
+    "test_application_id": "Android application ID of the instrumentation test APK.",
+    "runner": "Fully qualified instrumentation runner class. Cmd/Ctrl-click navigates to its declaration.",
+    "app_apk": "App APK path relative to this configuration file.",
+    "test_apk": "Instrumentation APK path relative to this configuration file.",
+    "device_output_dir": "Safe absolute device directory holding test output."
+  },
+  "VariantsConfig": {
+    "locales": "Nonempty mapping of locale IDs to instrumentation argument values.",
+    "themes": "Nonempty mapping of theme IDs to instrumentation argument values.",
+    "groups": "Named lists of capture IDs for selecting several journeys together."
+  },
+  "CaptureConfig": {
+    "label": "Human-readable capture label shown by the CLI.",
+    "description": "Optional explanatory text shown below the capture label.",
+    "test": "Fully qualified instrumentation class or Class#method selector; multiple selectors may be comma-separated. Cmd/Ctrl-click navigates to the declaration.",
+    "arguments": "Additional string-to-string instrumentation arguments for this capture.",
+    "timeout_seconds": "Positive timeout override in seconds; otherwise uses the project default.",
+    "locales": "Optional subset of locale IDs declared in variants.locales.",
+    "themes": "Optional subset of theme IDs declared in variants.themes.",
+    "navigation": "Capture navigation policy: ignore (default), gestural, three-button, or all.",
+    "defaults": "Typed permission, role and setting defaults, applied before capture and restored afterwards.",
+    "show_taps": "Show Android's tap indicator while capturing. Defaults to true.",
+    "artifacts": "Files produced by this journey; source paths are inferred from capture and artifact IDs."
+  },
+  "ArtifactConfig": {
+    "id": "Path-safe artifact ID, unique within this capture.",
+    "type": "Produced media type: image, video or json.",
+    "publish_dir": "Contained publication directory template including {locale}.",
+    "metadata": "Whether the image or video has an AASG semantic metadata sidecar. Defaults to false.",
+    "renditions": "Additional rendered publications using named pipelines."
+  },
+  "RenditionConfig": {
+    "publish_dir": "Contained publication directory template including {locale}.",
+    "pipeline": "ID of a rendering pipeline declared in pipelines.",
+    "extension": "Optional output extension override, such as .png or .mp4."
+  },
+  "PermissionDefault": {
+    "type": "Permission default discriminator; must be permission.",
+    "package": "Android package whose runtime permission is changed.",
+    "permission": "Fully qualified Android permission name.",
+    "state": "Desired permission state: granted or revoked."
+  },
+  "RoleDefault": {
+    "type": "Role default discriminator; must be role.",
+    "role": "Fully qualified Android role name.",
+    "holders": "Unique Android package names that should hold the role."
+  },
+  "ResizeStep": {
+    "type": "Resize operation discriminator; must be resize.",
+    "width": "Positive output width in pixels.",
+    "height": "Positive output height in pixels.",
+    "fit": "Resize fit: contain, cover or stretch. Defaults to contain."
+  },
+  "CropStep": {
+    "type": "Crop operation discriminator; must be crop.",
+    "x": "Left coordinate of a literal crop rectangle.",
+    "y": "Top coordinate of a literal crop rectangle.",
+    "width": "Positive width of a literal crop rectangle.",
+    "height": "Positive height of a literal crop rectangle.",
+    "region": "Semantic metadata region ID, used instead of a literal crop rectangle.",
+    "padding": "Nonnegative padding around the crop region in pixels."
+  },
+  "PadStep": {
+    "type": "Padding operation discriminator; must be pad.",
+    "width": "Positive canvas width in pixels.",
+    "height": "Positive canvas height in pixels.",
+    "color": "Canvas color. Defaults to transparent #00000000."
+  },
+  "BackgroundStep": {
+    "type": "Background operation discriminator; must be background.",
+    "color": "Background color, or mapping of theme IDs to colors."
+  },
+  "BlurStep": {
+    "type": "Blur operation discriminator; must be blur.",
+    "sigma": "Positive blur strength. Defaults to 10."
+  },
+  "RedactStep": {
+    "type": "Redaction operation discriminator; must be redact.",
+    "regions": "Nonempty list of semantic region IDs to redact.",
+    "mode": "Redaction mode: blur (default) or solid.",
+    "sigma": "Positive blur strength. Defaults to 18.",
+    "color": "Solid redaction color. Defaults to black."
+  },
+  "DeviceFrameStep": {
+    "type": "Device frame operation discriminator; must be device_frame.",
+    "source": "Frame provider ID declared in frame_sources.",
+    "frame": "Contained frame ID within the declared provider.",
+    "fit": "Screen fit: contain, cover (default) or stretch.",
+    "background": "Optional background color, or mapping of theme IDs to colors.",
+    "crop_to_frame": "Crop the output canvas to the device frame. Defaults to false."
+  },
+  "EdgeFadeStep": {
+    "type": "Edge fade operation discriminator; must be edge_fade.",
+    "edges": "Nonempty selection of top, right, bottom or left edges.",
+    "pixels": "Positive fade distance in pixels."
+  },
+  "FeatherStep": {
+    "type": "Feather operation discriminator; must be feather.",
+    "pixels": "Positive alpha feather distance in pixels."
+  },
+  "TrimStep": {
+    "type": "Video trim operation discriminator; must be trim.",
+    "start_seconds": "Nonnegative trim start time in seconds. Defaults to zero.",
+    "duration_seconds": "Positive retained video duration in seconds."
+  },
+  "TemporalFadeStep": {
+    "type": "Video fade operation discriminator; must be temporal_fade.",
+    "in_seconds": "Nonnegative fade-in duration in seconds. Defaults to zero.",
+    "out_seconds": "Nonnegative fade-out duration in seconds. Defaults to zero."
+  },
+  "GestureOverlayStep": {
+    "type": "Gesture overlay discriminator; must be gesture_overlay. Must be the first pipeline step.",
+    "color": "Gesture color in #RRGGBB or #RRGGBBAA format. Defaults to #FFFFFF.",
+    "halo_color": "Gesture halo color in #RRGGBB or #RRGGBBAA format. Defaults to #000000A0.",
+    "radius_px": "Positive gesture marker radius in pixels. Defaults to 44.",
+    "trail": "Draw gesture motion trails. Defaults to true.",
+    "timing_offset_ms": "Gesture timing offset in milliseconds, from -10000 to 10000.",
+    "motion": "Motion style: standard (default) or reduced."
+  },
+  "PipelineConfig": {
+    "steps": "Ordered list of typed FFmpeg rendering operations.",
+    "frame_rate": "Positive output video frame rate. Defaults to 30.",
+    "crf": "Video encoder constant rate factor, from 0 to 51. Defaults to 18."
+  },
+  "RemoteFrameSource": {
+    "kind": "Remote frame provider discriminator; must be device-frames-media.",
+    "index_url": "Remote provider index URL. Assets retain their own licenses and provenance.",
+    "allow_unlicensed_downloads": "Explicitly permit downloading assets without declared licenses. Defaults to false."
+  },
+  "LocalFrameSource": {
+    "kind": "Local frame provider discriminator; must be local.",
+    "root": "Declared frame directory, relative to this configuration file.",
+    "license": "License provenance for the local device frame assets."
+  },
+  "SettingDefault": {
+    "type": "Setting default discriminator; must be setting.",
+    "namespace": "Android settings namespace: system, secure or global.",
+    "key": "Setting key. system.show_touches is reserved for show_taps.",
+    "value": "String setting value, or null to remove the setting."
+  }
+}

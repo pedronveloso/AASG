@@ -55,7 +55,49 @@ Released versions are published to
 SDK Platform Tools, a Gradle wrapper, FFmpeg, and FFprobe; run `aasg doctor` after installation to
 check the local prerequisites and encoders needed by configured renditions.
 
+## Android Studio plugin
+
+The optional **AASG** plugin adds YAML completion, field documentation, structural
+validation, and Cmd/Ctrl-click navigation to Java and Kotlin capture classes,
+methods, and instrumentation runners in `aasg.yaml` and `aasg.yml`. Version 0.1.0
+targets Android Studio Quail 4 2026.1.4 Patch 1 (platform branch 261, starting at
+build 261.26222.65). Keep Studio's bundled Java, Kotlin, YAML, and JSON support enabled.
+
+For example, Cmd-click on macOS or Ctrl-click on Windows/Linux on the class name
+in this capture entry opens its Kotlin or Java declaration:
+
+```yaml
+captures:
+  advanced-link-cleanup:
+    label: Advanced Mode link cleanup
+    test: app.altsea.feature.screenshots.PlayStoreScreenshotCaptureTest
+```
+
+Navigation also supports `Class#method`, comma-separated selectors, nested classes
+using JVM `$` notation, and `android.direct_instrumentation.runner`. Class lookup
+includes imported instrumentation-test roots and dependencies. Unresolved classes
+and methods produce warnings after indexing finishes.
+
+Build the installable ZIP with JDK 21 as the Gradle JVM, from the repository root:
+
+```shell
+./android-studio-plugin/gradlew -p android-studio-plugin buildPlugin
+```
+
+The ZIP is written to `android-studio-plugin/build/distributions/`. It is also
+available as an artifact of the **Android Studio plugin** CI workflow. Install it
+through **Settings → Plugins → gear menu → Install Plugin from Disk**. See
+the [plugin build and installation guide](android-studio-plugin/README.md) and
+[editor documentation](https://pedronveloso.github.io/AASG/guides/android-studio/).
+Editor assistance uses a bundled schema and needs no Python installation. It
+supports configuration schema 9; older schemas are flagged while class navigation
+remains available. Use `aasg config validate` for complete semantic and filesystem
+validation. The plugin is distributed as a ZIP and versioned independently from
+the CLI and Android testkit.
+
 ## Development
+
+Run the Python package checks from the repository root:
 
 ```shell
 uv run ruff format --check .
@@ -67,7 +109,35 @@ npm ci
 npm run commitlint -- --from HEAD~1 --to HEAD
 ```
 
+Check the Android testkit with JDK 17 as the Gradle JVM:
+
+```shell
+./android-testkit/gradlew -p android-testkit \
+  checkKotlinAbi test build generatePomFileForMavenPublication
+```
+
+Check the Android Studio plugin with JDK 21 as the Gradle JVM:
+
+```shell
+uv run python tools/generate_ide_schema.py --check
+./android-studio-plugin/gradlew -p android-studio-plugin \
+  checkKotlinFormat test buildPlugin verifyPluginProjectConfiguration verifyPlugin
+```
+
+The plugin build downloads pinned Studio `2026.1.4.8`. Add
+`-PstudioLocalPath="/path/to/Android Studio.app"` to use an installed copy. The
+[plugin guide](android-studio-plugin/README.md) also covers sandbox launches and
+optional AltSea/Lazulite navigation smoke tests.
+
+When configuration models or editor field descriptions change, run
+`uv run python tools/generate_ide_schema.py` and include the regenerated schema.
+Maintain descriptions in `android-studio-plugin/schema-descriptions.json`; CI checks
+schema drift and documentation coverage. Python remains the source of truth for
+the YAML contract and semantic validation.
+
 Build the documentation with `npm ci --prefix docs` and `npm run build --prefix docs`.
+See [AGENTS.md](AGENTS.md) for shared repository guidance and
+[android-studio-plugin/AGENTS.md](android-studio-plugin/AGENTS.md) for plugin-specific rules.
 
 ## License
 

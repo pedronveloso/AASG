@@ -48,3 +48,15 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+
+  - package-ecosystem: "gradle"
+    directory: "/android-studio-plugin"
+    schedule:
+      interval: "monthly"
+    groups:
+      android-studio-plugin-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "build"
+      include: "scope"

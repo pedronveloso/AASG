@@ -1,0 +1,1254 @@
+{
+  "$defs": {
+    "AndroidConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "adb": {
+          "default": "adb",
+          "description": "ADB executable name or path. Defaults to adb.",
+          "title": "Adb",
+          "type": "string"
+        },
+        "additional_output_dir": {
+          "description": "Host directory containing collected AndroidX Test Storage output.",
+          "title": "Additional Output Dir",
+          "type": "string"
+        },
+        "direct_instrumentation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectInstrumentationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional direct ADB instrumentation configuration."
+        },
+        "gradle_wrapper": {
+          "default": "./gradlew",
+          "description": "Project Gradle wrapper path, relative to this configuration file.",
+          "title": "Gradle Wrapper",
+          "type": "string"
+        },
+        "locale_argument": {
+          "description": "Instrumentation argument name used to pass the selected locale.",
+          "title": "Locale Argument",
+          "type": "string"
+        },
+        "min_api": {
+          "default": 33,
+          "description": "Minimum supported Android API level. Defaults to 33.",
+          "minimum": 1,
+          "title": "Min Api",
+          "type": "integer"
+        },
+        "prepare_tasks": {
+          "description": "Gradle tasks to prepare or install the app and tests before capture.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Prepare Tasks",
+          "type": "array"
+        },
+        "test_task": {
+          "description": "Gradle task that executes the app's instrumentation capture tests.",
+          "title": "Test Task",
+          "type": "string"
+        },
+        "theme_argument": {
+          "description": "Instrumentation argument name used to pass the selected theme.",
+          "title": "Theme Argument",
+          "type": "string"
+        }
+      },
+      "required": [
+        "test_task",
+        "additional_output_dir",
+        "locale_argument",
+        "theme_argument"
+      ],
+      "title": "AndroidConfig",
+      "type": "object"
+    },
+    "ArtifactConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Path-safe artifact ID, unique within this capture.",
+          "title": "Id",
+          "type": "string"
+        },
+        "metadata": {
+          "default": false,
+          "description": "Whether the image or video has an AASG semantic metadata sidecar. Defaults to false.",
+          "title": "Metadata",
+          "type": "boolean"
+        },
+        "publish_dir": {
+          "description": "Contained publication directory template including {locale}.",
+          "title": "Publish Dir",
+          "type": "string"
+        },
+        "renditions": {
+          "description": "Additional rendered publications using named pipelines.",
+          "items": {
+            "$ref": "#/$defs/RenditionConfig"
+          },
+          "title": "Renditions",
+          "type": "array"
+        },
+        "type": {
+          "description": "Produced media type: image, video or json.",
+          "enum": [
+            "image",
+            "video",
+            "json"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "publish_dir"
+      ],
+      "title": "ArtifactConfig",
+      "type": "object"
+    },
+    "BackgroundStep": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            }
+          ],
+          "description": "Background color, or mapping of theme IDs to colors.",
+          "title": "Color"
+        },
+        "type": {
+          "const": "background",
+          "description": "Background operation discriminator; must be background.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "color"
+      ],
+      "title": "BackgroundStep",
+      "type": "object"
+    },
+    "BlurStep": {
+      "additionalProperties": false,
+      "properties": {
+        "sigma": {
+          "default": 10.0,
+          "description": "Positive blur strength. Defaults to 10.",
+          "exclusiveMinimum": 0,
+          "title": "Sigma",
+          "type": "number"
+        },
+        "type": {
+          "const": "blur",
+          "description": "Blur operation discriminator; must be blur.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "BlurStep",
+      "type": "object"
+    },
+    "CaptureConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Additional string-to-string instrumentation arguments for this capture.",
+          "title": "Arguments",
+          "type": "object"
+        },
+        "artifacts": {
+          "description": "Files produced by this journey; source paths are inferred from capture and artifact IDs.",
+          "items": {
+            "$ref": "#/$defs/ArtifactConfig"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "defaults": {
+          "description": "Typed permission, role and setting defaults, applied before capture and restored afterwards.",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "permission": "#/$defs/PermissionDefault",
+                "role": "#/$defs/RoleDefault",
+                "setting": "#/$defs/SettingDefault"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PermissionDefault"
+              },
+              {
+                "$ref": "#/$defs/RoleDefault"
+              },
+              {
+                "$ref": "#/$defs/SettingDefault"
+              }
+            ]
+          },
+          "title": "Defaults",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional explanatory text shown below the capture label.",
+          "title": "Description"
+        },
+        "label": {
+          "description": "Human-readable capture label shown by the CLI.",
+          "title": "Label",
+          "type": "string"
+        },
+        "locales": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional subset of locale IDs declared in variants.locales.",
+          "title": "Locales"
+        },
+        "navigation": {
+          "default": "ignore",
+          "description": "Capture navigation policy: ignore (default), gestural, three-button, or all.",
+          "enum": [
+            "gestural",
+            "three-button",
+            "all",
+            "ignore"
+          ],
+          "title": "Navigation",
+          "type": "string"
+        },
+        "show_taps": {
+          "default": true,
+          "description": "Show Android's tap indicator while capturing. Defaults to true.",
+          "title": "Show Taps",
+          "type": "boolean"
+        },
+        "test": {
+          "description": "Fully qualified instrumentation class or Class#method selector; multiple selectors may be comma-separated. Cmd/Ctrl-click navigates to the declaration.",
+          "title": "Test",
+          "type": "string"
+        },
+        "themes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional subset of theme IDs declared in variants.themes.",
+          "title": "Themes"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Positive timeout override in seconds; otherwise uses the project default.",
+          "title": "Timeout Seconds"
+        }
+      },
+      "required": [
+        "label",
+        "test",
+        "artifacts"
+      ],
+      "title": "CaptureConfig",
+      "type": "object"
+    },
+    "CropStep": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Positive height of a literal crop rectangle.",
+          "title": "Height"
+        },
+        "padding": {
+          "default": 0,
+          "description": "Nonnegative padding around the crop region in pixels.",
+          "minimum": 0,
+          "title": "Padding",
+          "type": "integer"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Semantic metadata region ID, used instead of a literal crop rectangle.",
+          "title": "Region"
+        },
+        "type": {
+          "const": "crop",
+          "description": "Crop operation discriminator; must be crop.",
+          "title": "Type",
+          "type": "string"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Positive width of a literal crop rectangle.",
+          "title": "Width"
+        },
+        "x": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Left coordinate of a literal crop rectangle.",
+          "title": "X"
+        },
+        "y": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Top coordinate of a literal crop rectangle.",
+          "title": "Y"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CropStep",
+      "type": "object"
+    },
+    "DeviceFrameStep": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional background color, or mapping of theme IDs to colors.",
+          "title": "Background"
+        },
+        "crop_to_frame": {
+          "default": false,
+          "description": "Crop the output canvas to the device frame. Defaults to false.",
+          "title": "Crop To Frame",
+          "type": "boolean"
+        },
+        "fit": {
+          "default": "cover",
+          "description": "Screen fit: contain, cover (default) or stretch.",
+          "enum": [
+            "contain",
+            "cover",
+            "stretch"
+          ],
+          "title": "Fit",
+          "type": "string"
+        },
+        "frame": {
+          "description": "Contained frame ID within the declared provider.",
+          "title": "Frame",
+          "type": "string"
+        },
+        "source": {
+          "description": "Frame provider ID declared in frame_sources.",
+          "title": "Source",
+          "type": "string"
+        },
+        "type": {
+          "const": "device_frame",
+          "description": "Device frame operation discriminator; must be device_frame.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "source",
+        "frame"
+      ],
+      "title": "DeviceFrameStep",
+      "type": "object"
+    },
+    "DirectInstrumentationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "app_apk": {
+          "description": "App APK path relative to this configuration file.",
+          "title": "App Apk",
+          "type": "string"
+        },
+        "application_id": {
+          "description": "Android application ID of the app under test.",
+          "title": "Application Id",
+          "type": "string"
+        },
+        "device_output_dir": {
+          "description": "Safe absolute device directory holding test output.",
+          "title": "Device Output Dir",
+          "type": "string"
+        },
+        "runner": {
+          "description": "Fully qualified instrumentation runner class. Cmd/Ctrl-click navigates to its declaration.",
+          "title": "Runner",
+          "type": "string"
+        },
+        "test_apk": {
+          "description": "Instrumentation APK path relative to this configuration file.",
+          "title": "Test Apk",
+          "type": "string"
+        },
+        "test_application_id": {
+          "description": "Android application ID of the instrumentation test APK.",
+          "title": "Test Application Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "application_id",
+        "test_application_id",
+        "runner",
+        "app_apk",
+        "test_apk",
+        "device_output_dir"
+      ],
+      "title": "DirectInstrumentationConfig",
+      "type": "object"
+    },
+    "EdgeFadeStep": {
+      "additionalProperties": false,
+      "properties": {
+        "edges": {
+          "description": "Nonempty selection of top, right, bottom or left edges.",
+          "items": {
+            "enum": [
+              "top",
+              "right",
+              "bottom",
+              "left"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Edges",
+          "type": "array"
+        },
+        "pixels": {
+          "description": "Positive fade distance in pixels.",
+          "exclusiveMinimum": 0,
+          "title": "Pixels",
+          "type": "integer"
+        },
+        "type": {
+          "const": "edge_fade",
+          "description": "Edge fade operation discriminator; must be edge_fade.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "edges",
+        "pixels"
+      ],
+      "title": "EdgeFadeStep",
+      "type": "object"
+    },
+    "FeatherStep": {
+      "additionalProperties": false,
+      "properties": {
+        "pixels": {
+          "description": "Positive alpha feather distance in pixels.",
+          "exclusiveMinimum": 0,
+          "title": "Pixels",
+          "type": "integer"
+        },
+        "type": {
+          "const": "feather",
+          "description": "Feather operation discriminator; must be feather.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "pixels"
+      ],
+      "title": "FeatherStep",
+      "type": "object"
+    },
+    "GestureOverlayStep": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "default": "#FFFFFF",
+          "description": "Gesture color in #RRGGBB or #RRGGBBAA format. Defaults to #FFFFFF.",
+          "pattern": "^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$",
+          "title": "Color",
+          "type": "string"
+        },
+        "halo_color": {
+          "default": "#000000A0",
+          "description": "Gesture halo color in #RRGGBB or #RRGGBBAA format. Defaults to #000000A0.",
+          "pattern": "^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$",
+          "title": "Halo Color",
+          "type": "string"
+        },
+        "motion": {
+          "default": "standard",
+          "description": "Motion style: standard (default) or reduced.",
+          "enum": [
+            "standard",
+            "reduced"
+          ],
+          "title": "Motion",
+          "type": "string"
+        },
+        "radius_px": {
+          "default": 44,
+          "description": "Positive gesture marker radius in pixels. Defaults to 44.",
+          "exclusiveMinimum": 0,
+          "title": "Radius Px",
+          "type": "integer"
+        },
+        "timing_offset_ms": {
+          "default": 0,
+          "description": "Gesture timing offset in milliseconds, from -10000 to 10000.",
+          "maximum": 10000,
+          "minimum": -10000,
+          "title": "Timing Offset Ms",
+          "type": "integer"
+        },
+        "trail": {
+          "default": true,
+          "description": "Draw gesture motion trails. Defaults to true.",
+          "title": "Trail",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "gesture_overlay",
+          "description": "Gesture overlay discriminator; must be gesture_overlay. Must be the first pipeline step.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "GestureOverlayStep",
+      "type": "object"
+    },
+    "LocalFrameSource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "local",
+          "description": "Local frame provider discriminator; must be local.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "license": {
+          "description": "License provenance for the local device frame assets.",
+          "title": "License",
+          "type": "string"
+        },
+        "root": {
+          "description": "Declared frame directory, relative to this configuration file.",
+          "title": "Root",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "root",
+        "license"
+      ],
+      "title": "LocalFrameSource",
+      "type": "object"
+    },
+    "PadStep": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "default": "#00000000",
+          "description": "Canvas color. Defaults to transparent #00000000.",
+          "title": "Color",
+          "type": "string"
+        },
+        "height": {
+          "description": "Positive canvas height in pixels.",
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "type": {
+          "const": "pad",
+          "description": "Padding operation discriminator; must be pad.",
+          "title": "Type",
+          "type": "string"
+        },
+        "width": {
+          "description": "Positive canvas width in pixels.",
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "width",
+        "height"
+      ],
+      "title": "PadStep",
+      "type": "object"
+    },
+    "PermissionDefault": {
+      "additionalProperties": false,
+      "properties": {
+        "package": {
+          "description": "Android package whose runtime permission is changed.",
+          "title": "Package",
+          "type": "string"
+        },
+        "permission": {
+          "description": "Fully qualified Android permission name.",
+          "title": "Permission",
+          "type": "string"
+        },
+        "state": {
+          "description": "Desired permission state: granted or revoked.",
+          "enum": [
+            "granted",
+            "revoked"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "type": {
+          "const": "permission",
+          "description": "Permission default discriminator; must be permission.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "package",
+        "permission",
+        "state"
+      ],
+      "title": "PermissionDefault",
+      "type": "object"
+    },
+    "PipelineConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "crf": {
+          "default": 18,
+          "description": "Video encoder constant rate factor, from 0 to 51. Defaults to 18.",
+          "maximum": 51,
+          "minimum": 0,
+          "title": "Crf",
+          "type": "integer"
+        },
+        "frame_rate": {
+          "default": 30,
+          "description": "Positive output video frame rate. Defaults to 30.",
+          "exclusiveMinimum": 0,
+          "title": "Frame Rate",
+          "type": "integer"
+        },
+        "steps": {
+          "description": "Ordered list of typed FFmpeg rendering operations.",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "background": "#/$defs/BackgroundStep",
+                "blur": "#/$defs/BlurStep",
+                "crop": "#/$defs/CropStep",
+                "device_frame": "#/$defs/DeviceFrameStep",
+                "edge_fade": "#/$defs/EdgeFadeStep",
+                "feather": "#/$defs/FeatherStep",
+                "gesture_overlay": "#/$defs/GestureOverlayStep",
+                "pad": "#/$defs/PadStep",
+                "redact": "#/$defs/RedactStep",
+                "resize": "#/$defs/ResizeStep",
+                "temporal_fade": "#/$defs/TemporalFadeStep",
+                "trim": "#/$defs/TrimStep"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ResizeStep"
+              },
+              {
+                "$ref": "#/$defs/CropStep"
+              },
+              {
+                "$ref": "#/$defs/PadStep"
+              },
+              {
+                "$ref": "#/$defs/BackgroundStep"
+              },
+              {
+                "$ref": "#/$defs/BlurStep"
+              },
+              {
+                "$ref": "#/$defs/RedactStep"
+              },
+              {
+                "$ref": "#/$defs/DeviceFrameStep"
+              },
+              {
+                "$ref": "#/$defs/EdgeFadeStep"
+              },
+              {
+                "$ref": "#/$defs/FeatherStep"
+              },
+              {
+                "$ref": "#/$defs/TrimStep"
+              },
+              {
+                "$ref": "#/$defs/TemporalFadeStep"
+              },
+              {
+                "$ref": "#/$defs/GestureOverlayStep"
+              }
+            ]
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "title": "PipelineConfig",
+      "type": "object"
+    },
+    "ProjectConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_root": {
+          "default": "artifacts",
+          "description": "Root for stable capture artifacts, relative to this configuration file. Defaults to artifacts.",
+          "title": "Artifact Root",
+          "type": "string"
+        },
+        "default_timeout_seconds": {
+          "default": 90,
+          "description": "Positive timeout in seconds used when a capture has no override. Defaults to 90.",
+          "exclusiveMinimum": 0,
+          "title": "Default Timeout Seconds",
+          "type": "integer"
+        },
+        "run_log_root": {
+          "default": "artifacts/aasg/runs",
+          "description": "Root for run manifests and redacted logs. Defaults to artifacts/aasg/runs.",
+          "title": "Run Log Root",
+          "type": "string"
+        }
+      },
+      "title": "ProjectConfig",
+      "type": "object"
+    },
+    "RedactStep": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "default": "black",
+          "description": "Solid redaction color. Defaults to black.",
+          "title": "Color",
+          "type": "string"
+        },
+        "mode": {
+          "default": "blur",
+          "description": "Redaction mode: blur (default) or solid.",
+          "enum": [
+            "blur",
+            "solid"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "regions": {
+          "description": "Nonempty list of semantic region IDs to redact.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Regions",
+          "type": "array"
+        },
+        "sigma": {
+          "default": 18.0,
+          "description": "Positive blur strength. Defaults to 18.",
+          "exclusiveMinimum": 0,
+          "title": "Sigma",
+          "type": "number"
+        },
+        "type": {
+          "const": "redact",
+          "description": "Redaction operation discriminator; must be redact.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "regions"
+      ],
+      "title": "RedactStep",
+      "type": "object"
+    },
+    "RemoteFrameSource": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_unlicensed_downloads": {
+          "default": false,
+          "description": "Explicitly permit downloading assets without declared licenses. Defaults to false.",
+          "title": "Allow Unlicensed Downloads",
+          "type": "boolean"
+        },
+        "index_url": {
+          "default": "https://raw.githubusercontent.com/jonnyjackson26/device-frames-media/main/device-frames-output/index.json",
+          "description": "Remote provider index URL. Assets retain their own licenses and provenance.",
+          "title": "Index Url",
+          "type": "string"
+        },
+        "kind": {
+          "const": "device-frames-media",
+          "description": "Remote frame provider discriminator; must be device-frames-media.",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RemoteFrameSource",
+      "type": "object"
+    },
+    "RenditionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "extension": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional output extension override, such as .png or .mp4.",
+          "title": "Extension"
+        },
+        "pipeline": {
+          "description": "ID of a rendering pipeline declared in pipelines.",
+          "title": "Pipeline",
+          "type": "string"
+        },
+        "publish_dir": {
+          "description": "Contained publication directory template including {locale}.",
+          "title": "Publish Dir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publish_dir",
+        "pipeline"
+      ],
+      "title": "RenditionConfig",
+      "type": "object"
+    },
+    "ResizeStep": {
+      "additionalProperties": false,
+      "properties": {
+        "fit": {
+          "default": "contain",
+          "description": "Resize fit: contain, cover or stretch. Defaults to contain.",
+          "enum": [
+            "contain",
+            "cover",
+            "stretch"
+          ],
+          "title": "Fit",
+          "type": "string"
+        },
+        "height": {
+          "description": "Positive output height in pixels.",
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "type": {
+          "const": "resize",
+          "description": "Resize operation discriminator; must be resize.",
+          "title": "Type",
+          "type": "string"
+        },
+        "width": {
+          "description": "Positive output width in pixels.",
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "width",
+        "height"
+      ],
+      "title": "ResizeStep",
+      "type": "object"
+    },
+    "RoleDefault": {
+      "additionalProperties": false,
+      "properties": {
+        "holders": {
+          "description": "Unique Android package names that should hold the role.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Holders",
+          "type": "array"
+        },
+        "role": {
+          "description": "Fully qualified Android role name.",
+          "title": "Role",
+          "type": "string"
+        },
+        "type": {
+          "const": "role",
+          "description": "Role default discriminator; must be role.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "role",
+        "holders"
+      ],
+      "title": "RoleDefault",
+      "type": "object"
+    },
+    "SettingDefault": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Setting key. system.show_touches is reserved for show_taps.",
+          "title": "Key",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Android settings namespace: system, secure or global.",
+          "enum": [
+            "system",
+            "secure",
+            "global"
+          ],
+          "title": "Namespace",
+          "type": "string"
+        },
+        "type": {
+          "const": "setting",
+          "description": "Setting default discriminator; must be setting.",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "String setting value, or null to remove the setting.",
+          "title": "Value"
+        }
+      },
+      "required": [
+        "type",
+        "namespace",
+        "key",
+        "value"
+      ],
+      "title": "SettingDefault",
+      "type": "object"
+    },
+    "TemporalFadeStep": {
+      "additionalProperties": false,
+      "properties": {
+        "in_seconds": {
+          "default": 0,
+          "description": "Nonnegative fade-in duration in seconds. Defaults to zero.",
+          "minimum": 0,
+          "title": "In Seconds",
+          "type": "number"
+        },
+        "out_seconds": {
+          "default": 0,
+          "description": "Nonnegative fade-out duration in seconds. Defaults to zero.",
+          "minimum": 0,
+          "title": "Out Seconds",
+          "type": "number"
+        },
+        "type": {
+          "const": "temporal_fade",
+          "description": "Video fade operation discriminator; must be temporal_fade.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "TemporalFadeStep",
+      "type": "object"
+    },
+    "TrimStep": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_seconds": {
+          "description": "Positive retained video duration in seconds.",
+          "exclusiveMinimum": 0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "start_seconds": {
+          "default": 0,
+          "description": "Nonnegative trim start time in seconds. Defaults to zero.",
+          "minimum": 0,
+          "title": "Start Seconds",
+          "type": "number"
+        },
+        "type": {
+          "const": "trim",
+          "description": "Video trim operation discriminator; must be trim.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "duration_seconds"
+      ],
+      "title": "TrimStep",
+      "type": "object"
+    },
+    "VariantsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Named lists of capture IDs for selecting several journeys together.",
+          "title": "Groups",
+          "type": "object"
+        },
+        "locales": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Nonempty mapping of locale IDs to instrumentation argument values.",
+          "title": "Locales",
+          "type": "object"
+        },
+        "themes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Nonempty mapping of theme IDs to instrumentation argument values.",
+          "title": "Themes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "locales",
+        "themes"
+      ],
+      "title": "VariantsConfig",
+      "type": "object"
+    }
+  },
+  "$id": "urn:aasg:configuration:schema:9",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "AASG Android capture-to-publish configuration. Run aasg config validate for full semantic and filesystem validation.",
+  "properties": {
+    "android": {
+      "$ref": "#/$defs/AndroidConfig",
+      "description": "Gradle, instrumentation, device and AndroidX Test Storage configuration."
+    },
+    "captures": {
+      "additionalProperties": {
+        "$ref": "#/$defs/CaptureConfig"
+      },
+      "description": "Named instrumentation capture journeys; each entry declares its test and produced artifacts.",
+      "title": "Captures",
+      "type": "object"
+    },
+    "frame_sources": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "device-frames-media": "#/$defs/RemoteFrameSource",
+            "local": "#/$defs/LocalFrameSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/RemoteFrameSource"
+          },
+          {
+            "$ref": "#/$defs/LocalFrameSource"
+          }
+        ]
+      },
+      "description": "Declared device frame providers with license provenance.",
+      "title": "Frame Sources",
+      "type": "object"
+    },
+    "pipelines": {
+      "additionalProperties": {
+        "$ref": "#/$defs/PipelineConfig"
+      },
+      "description": "Named sequences of typed image or video rendering operations.",
+      "title": "Pipelines",
+      "type": "object"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectConfig",
+      "description": "Artifact locations and default capture timeout, relative to this configuration file."
+    },
+    "schema": {
+      "const": 9,
+      "description": "Configuration schema version. AASG currently requires 9; see the migration guide for older configurations.",
+      "title": "Schema",
+      "type": "integer"
+    },
+    "variants": {
+      "$ref": "#/$defs/VariantsConfig",
+      "description": "Available locales, themes and named capture groups."
+    }
+  },
+  "required": [
+    "schema",
+    "android",
+    "variants",
+    "captures"
+  ],
+  "title": "AasgConfig",
+  "type": "object"
+}

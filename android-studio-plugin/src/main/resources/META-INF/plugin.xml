@@ -1,0 +1,32 @@
+<idea-plugin>
+    <id>io.github.pedronveloso.aasg</id>
+    <name>AASG</name>
+    <vendor url="https://github.com/pedronveloso/AASG">Pedro Veloso</vendor>
+    <description><![CDATA[
+        Android capture configuration assistance for aasg.yaml and aasg.yml:
+        YAML completion, documentation and structural validation, plus navigation
+        to Java and Kotlin capture classes, methods and instrumentation runners.
+    ]]></description>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+    <depends>org.jetbrains.kotlin</depends>
+    <depends>org.jetbrains.plugins.yaml</depends>
+    <depends>com.intellij.modules.json</depends>
+    <extensions defaultExtensionNs="org.jetbrains.kotlin">
+        <supportsKotlinPluginMode supportsK1="false" supportsK2="true"/>
+    </extensions>
+    <extensions defaultExtensionNs="com.intellij">
+        <psi.referenceContributor language="yaml"
+            implementation="io.github.pedronveloso.aasg.AasgReferenceContributor"/>
+        <completion.contributor language="yaml"
+            implementationClass="io.github.pedronveloso.aasg.AasgCompletionContributor"/>
+        <localInspection language="yaml" shortName="AasgUnresolvedReference"
+            displayName="Unresolved AASG Android reference" groupName="AASG"
+            enabledByDefault="true" level="WARNING"
+            implementationClass="io.github.pedronveloso.aasg.AasgUnresolvedReferenceInspection"/>
+    </extensions>
+    <extensions defaultExtensionNs="JavaScript">
+        <JsonSchema.ProviderFactory
+            implementation="io.github.pedronveloso.aasg.AasgSchemaProviderFactory"/>
+    </extensions>
+</idea-plugin>
