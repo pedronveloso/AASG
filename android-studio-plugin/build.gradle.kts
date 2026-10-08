@@ -17,7 +17,7 @@ repositories {
 val kotlinFormatter = configurations.create("kotlinFormatter")
 
 dependencies {
-    add(kotlinFormatter.name, "com.facebook:ktfmt:0.63")
+    add(kotlinFormatter.name, "com.facebook:ktfmt:0.64")
     intellijPlatform {
         val localStudio = providers.gradleProperty("studioLocalPath")
         if (localStudio.isPresent) {
