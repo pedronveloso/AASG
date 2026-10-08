@@ -1,0 +1,21 @@
+name: Detect affected components
+description: Select validation jobs from the complete event diff, falling back to all checks.
+outputs:
+  python:
+    description: Run Python validation
+    value: ${{ steps.changes.outputs.python }}
+  testkit:
+    description: Run Android testkit validation
+    value: ${{ steps.changes.outputs.testkit }}
+  plugin:
+    description: Run IDE plugin validation
+    value: ${{ steps.changes.outputs.plugin }}
+  documentation:
+    description: Run documentation validation
+    value: ${{ steps.changes.outputs.documentation }}
+runs:
+  using: composite
+  steps:
+    - id: changes
+      shell: bash
+      run: python3 tools/ci_changes.py

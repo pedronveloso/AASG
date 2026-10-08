@@ -32,6 +32,40 @@ intentional, review its compatibility and version impact, run `./gradlew updateK
 to make a failed check pass. Build the documentation independently with `npm ci --prefix docs` and
 `npm run build --prefix docs`.
 
+## Selective CI validation
+
+Both pull requests and pushes to `main` select checks from changed files:
+
+| Changed files | Validation |
+| --- | --- |
+| `src/`, `tests/`, `tools/`, `pyproject.toml`, `uv.lock` | Python formatting, lint, types, tests, and packaging on Ubuntu and macOS |
+| `android-testkit/` | Android testkit ABI, tests, build, and publication metadata |
+| `android-studio-plugin/` | IDE plugin schema contract/documentation, formatting, tests, ZIP, and compatibility |
+| `src/aasg/models.py`, schema generator/tests, `pyproject.toml`, `uv.lock` | Also IDE plugin validation |
+| `docs/`, documentation deployment workflow | Documentation build |
+| Canonical `reference/examples/aasg.yaml` | Also Python validation |
+| Root README, license, third-party notices | Python packaging validation through the Python gate |
+| Root `LICENSE` | Also IDE plugin validation, since the plugin packages it |
+| Shared detector/action/tests or either primary validation workflow | All components |
+
+Commitlint always runs. PR comparisons use the merge base of the base and head revisions,
+including fork PRs; pushes compare the previous revision with the new revision across all
+pushed commits. Deleted paths and both sides of renames participate in selection. Unknown
+paths or unavailable history run all checks rather than silently skipping validation.
+
+Repository guidance (`AGENTS.md`, `CLAUDE.md`), `.opencode/`, the automated review workflow,
+`.husky/`, root commitlint/npm configuration, `.gitignore`, funding, and Dependabot configuration
+do not trigger component checks. Plugin-only changes still run focused Python schema tests
+but skip the full Python matrix and testkit. Manual plugin runs always validate the plugin.
+
+Unrelated jobs are skipped through job conditions; the workflows themselves remain triggered.
+The **CI result** and **Plugin result** checks always run and require successful detection and
+successful selected checks. Failures, cancellations, and unexpected skips fail these result
+checks. They can be configured as required checks in branch protection; repository settings
+are not changed by the workflows. Publishing, documentation deployment, and automated review
+keep their existing triggers. Selective CI does not replace the complete local verification
+gate required by `AGENTS.md`.
+
 ## Keep public contracts synchronized
 
 Configuration schemas, semantic metadata, run manifests, CLI behavior, documented Python

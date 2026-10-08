@@ -51,7 +51,8 @@ def test_android_testkit_wrapper_resolves_java_from_path(tmp_path: Path) -> None
     java = java_directory / "java"
     java.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
     java.chmod(0o755)
-    environment = os.environ | {"PATH": str(java_directory)}
+    # Keep the wrapper's system utilities available while resolving our fake Java first.
+    environment = os.environ | {"PATH": os.pathsep.join((str(java_directory), os.environ["PATH"]))}
     environment.pop("JAVA_HOME", None)
 
     result = subprocess.run(
@@ -63,7 +64,8 @@ def test_android_testkit_wrapper_resolves_java_from_path(tmp_path: Path) -> None
     )
 
     assert result.returncode == 0
-    assert "org.gradle.wrapper.GradleWrapperMain" in result.stdout
+    assert "-jar" in result.stdout.splitlines()
+    assert "gradle-wrapper.jar" in result.stdout
     assert "sentinel" in result.stdout
 
 

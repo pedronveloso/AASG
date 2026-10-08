@@ -6,6 +6,21 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      python: ${{ steps.changes.outputs.python }}
+      testkit: ${{ steps.changes.outputs.testkit }}
+      documentation: ${{ steps.changes.outputs.documentation }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: changes
+        uses: ./.github/actions/detect-changes
+
   commitlint:
     runs-on: ubuntu-latest
     permissions:
@@ -31,6 +46,8 @@ jobs:
         run: npm exec -- commitlint --last --verbose
 
   validate:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-14]
@@ -52,6 +69,8 @@ jobs:
       - run: uv build
 
   testkit:
+    needs: changes
+    if: needs.changes.outputs.testkit == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,6 +90,8 @@ jobs:
         run: ./gradlew test build generatePomFileForMavenPublication
 
   documentation:
+    needs: changes
+    if: needs.changes.outputs.documentation == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,3 +106,17 @@ jobs:
         working-directory: docs
       - run: npm run build
         working-directory: docs
+
+  result:
+    name: CI result
+    if: always()
+    needs: [changes, commitlint, validate, testkit, documentation]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check selected validation results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/ci_changes.py --check-results ci
