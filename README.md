@@ -139,6 +139,30 @@ Build the documentation with `npm ci --prefix docs` and `npm run build --prefix 
 See [AGENTS.md](AGENTS.md) for shared repository guidance and
 [android-studio-plugin/AGENTS.md](android-studio-plugin/AGENTS.md) for plugin-specific rules.
 
+### Selective CI validation
+
+PRs and pushes to `main` run validation only for affected components. Python changes run
+the Python checks on Ubuntu and macOS; Android testkit changes run its ABI, tests, and
+packaging checks; IDE plugin changes run its schema, formatting, tests, packaging, and
+compatibility checks; documentation changes run the documentation build. Commitlint
+always runs. Plugin-only changes skip the full Python suite and Android testkit checks.
+
+Configuration models, schema tooling/tests, and Python dependency configuration also
+trigger plugin validation because its schema is generated from Python. The canonical
+documentation YAML example also triggers Python validation. Root README and license
+files trigger Python packaging validation; the root license also triggers plugin validation.
+Changes to shared CI selection logic or either primary validation workflow run all checks.
+
+The detector compares PRs against their merge base and pushes against the previous commit,
+including deletions and both sides of renames. Unknown files or unavailable comparison
+history run all checks. Repository guidance, review-agent configuration, and administrative
+metadata are exempt; manual plugin runs always validate the plugin. Unrelated jobs appear
+as skipped. The always-running **CI result** and **Plugin result** checks fail if detection
+or any selected check fails, is cancelled, or unexpectedly skips; these are suitable required
+checks for branch protection. Publishing, documentation deployment, and automated review
+retain their existing triggers. See the [contributor guide](https://pedronveloso.github.io/AASG/contributing/)
+for the selection rules.
+
 ## License
 
 AASG source code and documentation are licensed under the Apache License 2.0.
