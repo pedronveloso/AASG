@@ -4,9 +4,9 @@ description: Edit AASG configuration with completion, validation and Android sou
 ---
 
 The **AASG** Android Studio plugin adds YAML configuration assistance and navigation
-to the instrumentation tests that own your captures. Version 0.1.0 targets Android
-Studio Quail 4 2026.1.4 Patch 1, with compatibility restricted to platform branch
-261 starting at build 261.26222.65.
+to the instrumentation tests that own your captures. Version 0.2.0 supports Android
+Studio from Quail 4 2026.1.4 Patch 1 (build 261.26222.65) through platform
+branch 262, including Rabbit 2 2026.2.2.
 
 ## Install the plugin
 

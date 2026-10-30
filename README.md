@@ -59,9 +59,9 @@ check the local prerequisites and encoders needed by configured renditions.
 
 The optional **AASG** plugin adds YAML completion, field documentation, structural
 validation, and Cmd/Ctrl-click navigation to Java and Kotlin capture classes,
-methods, and instrumentation runners in `aasg.yaml` and `aasg.yml`. Version 0.1.0
-targets Android Studio Quail 4 2026.1.4 Patch 1 (platform branch 261, starting at
-build 261.26222.65). Keep Studio's bundled Java, Kotlin, YAML, and JSON support enabled.
+methods, and instrumentation runners in `aasg.yaml` and `aasg.yml`. Version 0.2.0
+supports Android Studio from Quail 4 2026.1.4 Patch 1 (build 261.26222.65)
+through platform branch 262, including Rabbit 2 2026.2.2. Keep Studio's bundled Java, Kotlin, YAML, and JSON support enabled.
 
 For example, Cmd-click on macOS or Ctrl-click on Windows/Linux on the class name
 in this capture entry opens its Kotlin or Java declaration:

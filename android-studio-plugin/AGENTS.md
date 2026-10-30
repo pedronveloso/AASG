@@ -34,17 +34,18 @@ capture commands from the plugin.
 - Prefer project sources, include instrumentation-test roots, and allow dependency runners.
   Navigate Kotlin references to source declarations and retain the IDE's target chooser.
 - Defer index-dependent assistance while Studio is indexing. Tolerate incomplete YAML.
-- Keep IDE dependencies and compatibility bounds explicit. The initial target is Studio
-  `2026.1.4.8`, platform branch 261 starting at build 261.26222.65. Verify compatibility
-  before changing the supported IDE range; use the local installation override for development.
+- Keep IDE dependencies and compatibility bounds explicit. The build baseline is Studio
+  `2026.1.4.8`, platform branch 261 starting at build 261.26222.65; the supported range
+  extends through branch 262. Verify compatibility before changing that range; use the local
+  installation override for development.
 - Build against the checked-in schema without requiring Python on plugin users' machines.
   Regenerate the schema when models or descriptions change; never edit generated schema by hand.
   Keep configuration schema 9 unless the repository's YAML contract rules require a migration.
 
 ## Versioning
 
-Version the plugin independently using `pluginVersion` in `gradle.properties`. The initial
-version is 0.1.0. Apply the repository's SemVer rules to shipped plugin code, bundled-schema
+Version the plugin independently using `pluginVersion` in `gradle.properties`. Apply the
+repository's SemVer rules to shipped plugin code, bundled-schema
 behavior, editor interfaces, and runtime dependencies. Plugin-only changes do not bump the
 shared AASG/testkit version. Documentation, tests, CI, and build tooling alone do not bump
 the plugin version.

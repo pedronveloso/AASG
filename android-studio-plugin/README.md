@@ -6,14 +6,14 @@ editor. Files can be anywhere inside the opened project.
 
 ## Install
 
-The first release targets **Android Studio Quail 4 2026.1.4 Patch 1**, platform build
-261.26222.65. Compatibility is restricted to branch 261, starting at that build.
-The plugin's version is independently maintained at **0.1.0**.
+Version **0.2.0** supports Android Studio from **Quail 4 2026.1.4 Patch 1**
+(build 261.26222.65) through platform branch 262, including **Rabbit 2 2026.2.2**.
+The plugin version is independently maintained.
 
 1. Build the ZIP using the instructions below, or download the artifact from the
    repository's **Android Studio plugin** GitHub Actions workflow.
 2. Open **Settings → Plugins → gear menu → Install Plugin from Disk** and select
-   `build/distributions/aasg-android-studio-0.1.0.zip`.
+   `build/distributions/aasg-android-studio-0.2.0.zip`.
 3. Restart Studio if requested. Open and sync the Android project, then open its
    `aasg.yaml` or `aasg.yml`.
 
