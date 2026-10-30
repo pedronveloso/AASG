@@ -44,8 +44,8 @@ capture commands from the plugin.
 
 ## Versioning
 
-Version the plugin independently using `pluginVersion` in `gradle.properties`. The initial
-version is 0.1.0. Apply the repository's SemVer rules to shipped plugin code, bundled-schema
+Version the plugin independently using `pluginVersion` in `gradle.properties`. Apply the
+repository's SemVer rules to shipped plugin code, bundled-schema
 behavior, editor interfaces, and runtime dependencies. Plugin-only changes do not bump the
 shared AASG/testkit version. Documentation, tests, CI, and build tooling alone do not bump
 the plugin version.

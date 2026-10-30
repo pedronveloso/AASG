@@ -43,7 +43,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Test against Android Studio Rabbit 2
         working-directory: android-studio-plugin
-        run: xvfb-run ./gradlew test -PstudioVersion=2026.2.2.8
+        run: xvfb-run ./gradlew test -PtestRabbit2
       - name: Test, package and verify plugin compatibility
         working-directory: android-studio-plugin
         run: xvfb-run ./gradlew checkKotlinFormat test buildPlugin verifyPluginProjectConfiguration verifyPlugin

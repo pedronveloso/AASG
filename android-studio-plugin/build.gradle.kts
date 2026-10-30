@@ -16,6 +16,7 @@ repositories {
 }
 
 val kotlinFormatter = configurations.create("kotlinFormatter")
+val rabbit2StudioVersion = providers.gradleProperty("rabbit2StudioVersion")
 
 dependencies {
     add(kotlinFormatter.name, "com.facebook:ktfmt:0.64")
@@ -24,7 +25,10 @@ dependencies {
         if (localStudio.isPresent) {
             local(localStudio.get())
         } else {
-            androidStudio(providers.gradleProperty("studioVersion").get())
+            val studioVersion =
+                if (providers.gradleProperty("testRabbit2").isPresent) rabbit2StudioVersion
+                else providers.gradleProperty("studioVersion")
+            androidStudio(studioVersion.get())
         }
         bundledPlugins("com.intellij.java", "org.jetbrains.kotlin", "org.jetbrains.plugins.yaml")
         bundledModule("intellij.json")
@@ -50,7 +54,7 @@ intellijPlatform {
     pluginVerification {
         ides {
             current()
-            create(IntelliJPlatformType.AndroidStudio, "2026.2.2.8")
+            create(IntelliJPlatformType.AndroidStudio, rabbit2StudioVersion.get())
         }
     }
 }
