@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
@@ -43,11 +44,14 @@ intellijPlatform {
         name = "AASG"
         ideaVersion {
             sinceBuild = "261.26222.65"
-            untilBuild = "261.*"
+            untilBuild = "262.*"
         }
     }
     pluginVerification {
-        ides { current() }
+        ides {
+            current()
+            create(IntelliJPlatformType.AndroidStudio, "2026.2.2.8")
+        }
     }
 }
 
