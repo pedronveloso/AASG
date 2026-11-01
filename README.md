@@ -160,7 +160,8 @@ metadata are exempt; manual plugin runs always validate the plugin. Unrelated jo
 as skipped. The always-running **CI result** and **Plugin result** checks fail if detection
 or any selected check fails, is cancelled, or unexpectedly skips; these are suitable required
 checks for branch protection. Publishing, documentation deployment, and automated review
-retain their existing triggers. See the [contributor guide](https://pedronveloso.github.io/AASG/contributing/)
+retain their existing triggers, and automated review skips pull requests opened by bot accounts
+such as Dependabot. See the [contributor guide](https://pedronveloso.github.io/AASG/contributing/)
 for the selection rules.
 
 ## License
