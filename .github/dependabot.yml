@@ -41,6 +41,9 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    ignore:
+      # Releases after v2.0.22 no longer ship the OpenCode GitHub Action.
+      - dependency-name: "anomalyco/opencode*"
     groups:
       workflow-actions:
         patterns:

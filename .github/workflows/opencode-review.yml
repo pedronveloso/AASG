@@ -28,6 +28,8 @@ jobs:
           persist-credentials: true
 
       - name: Run OpenCode review
+        # Upstream removed this action (anomalyco/opencode#59032), so it stays frozen on
+        # the last pinned release that ships it. Dependabot ignores it in .github/dependabot.yml.
         uses: anomalyco/opencode/github@527f0b931d1f9b3ebd34e106c51b31ce5db5b075 # v2.0.22
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
