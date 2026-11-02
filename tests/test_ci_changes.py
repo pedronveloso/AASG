@@ -213,7 +213,7 @@ def test_workflows_preserve_job_conditions_and_always_run_result_gates() -> None
     ):
         assert ci[job]["needs"] == "changes"
         assert ci[job]["if"] == f"needs.changes.outputs.{component} == 'true'"
-    assert ci["validate"]["strategy"]["matrix"]["os"] == ["ubuntu-latest", "macos-14"]
+    assert ci["validate"]["strategy"]["matrix"]["os"] == ["ubuntu-latest", "macos-latest"]
     assert "needs" not in ci["commitlint"] and "if" not in ci["commitlint"]
     assert plugin["plugin"]["if"] == "needs.changes.outputs.plugin == 'true'"
     for jobs in (ci, plugin):

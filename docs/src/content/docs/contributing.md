@@ -63,8 +63,9 @@ The **CI result** and **Plugin result** checks always run and require successful
 successful selected checks. Failures, cancellations, and unexpected skips fail these result
 checks. They can be configured as required checks in branch protection; repository settings
 are not changed by the workflows. Publishing, documentation deployment, and automated review
-keep their existing triggers. Selective CI does not replace the complete local verification
-gate required by `AGENTS.md`.
+keep their existing triggers, and automated review skips pull requests opened by bot accounts
+such as Dependabot. Selective CI does not replace the complete local verification gate required
+by `AGENTS.md`.
 
 ## Keep public contracts synchronized
 

@@ -17,7 +17,8 @@ jobs:
   review:
     if: >-
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -27,7 +28,9 @@ jobs:
           persist-credentials: true
 
       - name: Run OpenCode review
-        uses: anomalyco/opencode/github@098aa7fd6e02b03d6fc410f0b052038c7d4c5e81 # v2.2.2
+        # Upstream removed this action (anomalyco/opencode#59032), so it stays frozen on
+        # the last pinned release that ships it. Dependabot ignores it in .github/dependabot.yml.
+        uses: anomalyco/opencode/github@527f0b931d1f9b3ebd34e106c51b31ce5db5b075 # v2.0.22
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
